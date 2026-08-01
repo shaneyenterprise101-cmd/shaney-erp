@@ -1,6 +1,50 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase'; // 👈 Firebase instance imported
-import { doc, setDoc } from 'firebase/firestore';
+import jsPDF from 'jspdf';
+import { toJpeg } from 'html-to-image';
+
+const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
+
+// 🟢 BULLETPROOF DATA SANITIZER WITH TIMESTAMP FALLBACK
+const sanitizeForCloud = (dataObj) => {
+  let cleaned = { ...dataObj };
+  if (!cleaned.updatedAt) {
+    cleaned.updatedAt = Date.now(); // 🟢 Timestamp fallback
+  }
+  Object.keys(cleaned).forEach(key => {
+    if (cleaned[key] === undefined) {
+      cleaned[key] = null;
+    }
+  });
+  return cleaned;
+};
+
+// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
+const logActionToBackend = async (actionText) => {
+  try {
+    const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
+    let activeName = "Admin";
+    
+    if (role === "ADMIN") {
+      activeName = "Admin";
+    } else {
+      try {
+        const activeUser = JSON.parse(localStorage.getItem("ERP_Active_Staff_Data") || "{}");
+        activeName = activeUser?.name || "Staff";
+      } catch (e) {
+        activeName = "Staff";
+      }
+    }
+
+    const formattedAction = `${activeName.toUpperCase()}: ${actionText}`;
+    await fetch(`${BACKEND_URL}/api/logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: formattedAction })
+    });
+  } catch (e) {
+    console.error("Log push error:", e);
+  }
+};
 
 export default function Templates() {
   const [designMode, setDesignMode] = useState('quotation');
@@ -40,6 +84,48 @@ export default function Templates() {
     };
     window.addEventListener('ERP_DATA_UPDATED', handleDataUpdate);
     return () => window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
+  }, []);
+
+  // 🟢 Fetch templates from Cloud on load
+  useEffect(() => {
+    const fetchCloudTemplates = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/data`);
+        if (res.ok) {
+          const allData = await res.json();
+          if (allData && typeof allData === 'object') {
+            let cloudTemplates = {};
+            let cloudFirms = [];
+
+            if (Array.isArray(allData)) {
+              allData.filter(item => item.docType === 'firm_template').forEach(t => {
+                cloudTemplates[t.id] = t;
+              });
+              cloudFirms = allData.filter(item => item.docType === 'company');
+            } else {
+              if (allData.firm_templates) {
+                Object.keys(allData.firm_templates).forEach(k => {
+                  cloudTemplates[k] = allData.firm_templates[k];
+                });
+              }
+              if (allData.companies) cloudFirms = allData.companies;
+            }
+
+            if (Object.keys(cloudTemplates).length > 0) {
+              setFirmTemplates(cloudTemplates);
+              localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(cloudTemplates));
+            }
+            if (cloudFirms.length > 0) {
+              setFirms(cloudFirms);
+              localStorage.setItem('ERP_Companies_v104', JSON.stringify(cloudFirms));
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching templates from cloud:", err);
+      }
+    };
+    fetchCloudTemplates();
   }, []);
 
   // 🟢 Filter firms based on active designMode (Certificate vs Quotation)
@@ -165,7 +251,6 @@ export default function Templates() {
       if (firmTemplates[templateKey]) {
         setCurrentDesign(prev => ({ ...prev, ...firmTemplates[templateKey] }));
       } else if (firmTemplates[selectedFirmId]) {
-        // Fallback for old single keys
         setCurrentDesign(prev => ({ ...prev, ...firmTemplates[selectedFirmId] }));
       }
     }
@@ -198,15 +283,20 @@ export default function Templates() {
     };
 
     try {
-      await setDoc(doc(db, "firm_templates", String(templateKey)), templatePayload, { merge: true });
+      await fetch(`${BACKEND_URL}/api/data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'firm_templates', id: String(templateKey), data: sanitizeForCloud(templatePayload) })
+      });
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', templatePayload);
       }
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'templates' } }));
+      logActionToBackend(`Saved ${designMode} template for firm ID: ${selectedFirmId}`);
       alert(`✅ ${designMode.toUpperCase()} Template for "${activeFirmObj.name}" saved to Cloud successfully!`);
     } catch (err) {
-      console.error("Firebase template save error:", err);
+      console.error("Cloud template save error:", err);
       alert("❌ Failed to save template to cloud: " + err.message);
     }
   };
@@ -807,7 +897,7 @@ export default function Templates() {
 
   return (
     <div 
-      className="animate-[fadeIn_0.3s_ease-in-out] max-w-full mx-auto pb-16 px-2 select-none relative"
+      className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out] select-none"
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
     >
@@ -869,7 +959,8 @@ export default function Templates() {
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <div className="max-w-7xl mx-auto pb-10">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
         {/* ========================================================= */}
         {/* LEFT SIDE: CONTROLS & SETTINGS (5 Columns) */}
@@ -910,7 +1001,7 @@ export default function Templates() {
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col gap-3">
             <div className="flex justify-between items-center border-b border-slate-100 pb-2">
               <h3 className="font-black text-slate-800 text-[11px] uppercase text-indigo-600">
-                🎨 Edit Graphics For Firm ({designMode}):[cite: 24]
+                🎨 Edit Graphics For Firm ({designMode}):
               </h3>
               <button 
                 type="button" 
@@ -1442,5 +1533,6 @@ export default function Templates() {
 
       </div>
     </div>
+  </div>
   );
 }

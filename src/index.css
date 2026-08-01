@@ -7,13 +7,48 @@
     --header-font: 'Arial', sans-serif; 
 }
 
-body { 
+/* 🟢 Viewport Lock for Desktop-like software feel */
+html, body, #root { 
+    width: 100vw;
+    height: 100vh;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
     font-family: 'Inter', sans-serif; 
     background-color: #f8fafc; 
     color: #0f172a; 
-    overflow-y: scroll; 
-    overflow-x: hidden; 
 }
 
-.pro-input { width: 100%; font-size: 0.75rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #cbd5e1; background-color: #f8fafc; font-weight: 600; outline: none; transition: all 0.2s; color: #334155; }
-.pro-input:focus { border-color: #00a67e; background-color: #fff; box-shadow: 0 0 0 3px rgba(0, 166, 126, 0.1); }
+/* 🟢 Custom Scrollbar for internal tables & lists */
+.custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+}
+
+.pro-input { 
+    width: 100%; 
+    font-size: 0.75rem; 
+    padding: 0.5rem 0.75rem; 
+    border-radius: 0.5rem; 
+    border: 1px solid #cbd5e1; 
+    background-color: #f8fafc; 
+    font-weight: 600; 
+    outline: none; 
+    transition: all 0.2s; 
+    color: #334155; 
+}
+.pro-input:focus { 
+    border-color: #00a67e; 
+    background-color: #fff; 
+    box-shadow: 0 0 0 3px rgba(0, 166, 126, 0.1); 
+}

@@ -1,44 +1,43 @@
-// src/SyncManager.js
-
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
+// Unified Sync Manager to interact with Render Backend API & Local Storage / SQLite (0 Direct Firebase SDK Reads/Writes)
 export const SyncManager = {
   
-  // 1. Load Data locally for instant UI load & 0 network reads
+  // 1. Load Data (LocalStorage pehle, taaki instant load ho)
   getLocalData(key, fallback = []) {
     try {
       const data = localStorage.getItem(key);
       return data ? JSON.parse(data) : fallback;
     } catch (e) {
-      console.error(`Error reading local data for ${key}:`, e);
       return fallback;
     }
   },
 
-  // 2. Save Data Locally & Push to Render Backend (Optimized Write)
+  // 2. Save Data locally and push to Render Backend & SQLite IPC
   async saveData(storageKey, firestoreCollection, item) {
     try {
       let list = this.getLocalData(storageKey, []);
-      const index = list.findIndex(i => String(i.id) === String(item.id));
+      const itemPayload = { ...item, updatedAt: item.updatedAt || Date.now() };
+      const index = list.findIndex(i => i.id === item.id);
       if (index !== -1) {
-        list[index] = item;
+        list[index] = itemPayload;
       } else {
-        list.push(item);
+        list.push(itemPayload);
       }
       localStorage.setItem(storageKey, JSON.stringify(list));
 
-      // Skip network sync if user is logged out
-      if (!localStorage.getItem("ERP_Active_Role")) return true;
-
-      // Push updated item state to Render Backend cleanly
+      // Sync to Render Backend (AWS DynamoDB)
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: storageKey,
-          item: item
-        })
+        body: JSON.stringify({ type: firestoreCollection, id: String(item.id), data: itemPayload })
       });
+
+      // Sync to Local SQLite via Electron IPC if available
+      if (window.require) {
+        const { ipcRenderer } = window.require('electron');
+        if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', itemPayload);
+      }
 
       return true;
     } catch (e) {
@@ -47,23 +46,21 @@ export const SyncManager = {
     }
   },
 
-  // 3. Delete Data Locally & Remotely
+  // 3. Delete Data
   async deleteData(storageKey, firestoreCollection, itemId) {
     try {
       let list = this.getLocalData(storageKey, []);
-      list = list.filter(i => String(i.id) !== String(itemId));
+      list = list.filter(i => i.id !== itemId);
       localStorage.setItem(storageKey, JSON.stringify(list));
 
-      if (!localStorage.getItem("ERP_Active_Role")) return true;
+      // Delete from Render Backend
+      await fetch(`${BACKEND_URL}/api/data/${itemId}`, { method: 'DELETE' });
 
-      await fetch(`${BACKEND_URL}/api/data/delete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          key: storageKey,
-          itemId: itemId
-        })
-      });
+      // Delete/Mark deleted in SQLite IPC
+      if (window.require) {
+        const { ipcRenderer } = window.require('electron');
+        if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id: itemId, deleted: true, updatedAt: Date.now() });
+      }
 
       return true;
     } catch (e) {
@@ -72,19 +69,21 @@ export const SyncManager = {
     }
   },
 
-  // 4. Fetch Fresh Data from Render Backend only when required
+  // 4. Fetch Fresh Data from Cloud Backend
   async fetchFreshDataIfNeeded(storageKey, firestoreCollection) {
-    if (!localStorage.getItem("ERP_Active_Role")) {
-      return this.getLocalData(storageKey, []);
-    }
-
     try {
-      const response = await fetch(`${BACKEND_URL}/api/data?key=${storageKey}`);
-      if (response.ok) {
-        const result = await response.json();
-        if (result && result.success && Array.isArray(result.data)) {
-          localStorage.setItem(storageKey, JSON.stringify(result.data));
-          return result.data;
+      const res = await fetch(`${BACKEND_URL}/api/data`);
+      if (res.ok) {
+        const allData = await res.json();
+        let cloudData = [];
+        if (Array.isArray(allData)) {
+          cloudData = allData.filter(item => item.docType === firestoreCollection || item.type === firestoreCollection);
+        } else if (allData[firestoreCollection] && Array.isArray(allData[firestoreCollection])) {
+          cloudData = allData[firestoreCollection];
+        }
+        if (cloudData.length > 0) {
+          localStorage.setItem(storageKey, JSON.stringify(cloudData));
+          return cloudData;
         }
       }
     } catch (e) {
@@ -93,33 +92,26 @@ export const SyncManager = {
     return this.getLocalData(storageKey, []);
   },
 
-  // 5. Post Office Live Log to Render Backend
+  // 🟢 5. LIVE OFFICE FEED LOGS
   async postOfficeLog(actionText, staffName) {
-    if (!localStorage.getItem("ERP_Active_Role")) return;
-
     try {
-      const staff = (staffName || 'ADMIN').toUpperCase();
-      const payload = {
-        action: `${staff}: ${actionText}`,
-        staff: staff
-      };
-
+      const now = new Date();
+      const formattedAction = `${staffName.toUpperCase()}: ${actionText}`;
+      
       await fetch(`${BACKEND_URL}/api/logs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ action: formattedAction })
       });
 
       let logs = this.getLocalData("ERP_Office_Live_Logs", []);
-      const now = new Date();
-      const logObj = {
+      logs.unshift({
         id: Date.now(),
-        staff: staff,
-        action: actionText,
+        staff: staffName.toUpperCase(),
+        action: formattedAction,
         date: now.toLocaleDateString('en-GB'),
         time: now.toLocaleTimeString()
-      };
-      logs.unshift(logObj);
+      });
       if (logs.length > 100) logs.pop();
       localStorage.setItem("ERP_Office_Live_Logs", JSON.stringify(logs));
       
@@ -130,23 +122,13 @@ export const SyncManager = {
     }
   },
 
-  // 6. Fetch Filtered Office Logs
-  async getOfficeLogs(staff = 'ALL', date = '') {
-    if (!localStorage.getItem("ERP_Active_Role")) {
-      return this.getLocalData("ERP_Office_Live_Logs", []);
-    }
-
+  // 🟢 6. FETCH RECENT OFFICE LOGS
+  async getOfficeLogs() {
     try {
-      let url = `${BACKEND_URL}/api/logs`;
-      const params = new URLSearchParams();
-      if (staff && staff !== 'ALL') params.append('staff', staff);
-      if (date) params.append('date', date);
-      if ([...params].length > 0) url += `?${params.toString()}`;
-
-      const response = await fetch(url);
-      if (response.ok) {
-        const logs = await response.json();
-        if (Array.isArray(logs)) {
+      const res = await fetch(`${BACKEND_URL}/api/logs`);
+      if (res.ok) {
+        const logs = await res.json();
+        if (Array.isArray(logs) && logs.length > 0) {
           localStorage.setItem("ERP_Office_Live_Logs", JSON.stringify(logs));
           return logs;
         }
@@ -157,30 +139,51 @@ export const SyncManager = {
     return this.getLocalData("ERP_Office_Live_Logs", []);
   },
 
-  // 7. Heartbeat / Online Presence Worker
+  // 🟢 7. HEARTBEAT / ONLINE PRESENCE
   async updateHeartbeat(username) {
-    if (!username || !localStorage.getItem("ERP_Active_Role")) return;
+    if (!username) return;
     try {
-      await fetch(`${BACKEND_URL}/api/heartbeat`, {
+      const userKey = username.toLowerCase();
+      const payload = {
+        id: 'session_' + userKey,
+        docType: 'active_session',
+        username: username.toUpperCase(),
+        lastActive: Date.now(),
+        updatedAt: Date.now()
+      };
+      await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.toUpperCase() })
+        body: JSON.stringify({ type: 'active_sessions', id: String(userKey), data: payload })
       });
     } catch (e) {
-      // Silent catch to suppress background noise
+      console.error("Heartbeat error:", e);
     }
   },
 
-  // 8. Get Active Sessions Map
+  // 🟢 8. GET ACTIVE SESSIONS
   async getActiveSessions() {
-    if (!localStorage.getItem("ERP_Active_Role")) return {};
     try {
-      const response = await fetch(`${BACKEND_URL}/api/sessions`);
-      if (response.ok) {
-        return await response.json();
+      const res = await fetch(`${BACKEND_URL}/api/data`);
+      if (res.ok) {
+        const allData = await res.json();
+        let sessions = [];
+        if (Array.isArray(allData)) {
+          sessions = allData.filter(item => item.docType === 'active_session');
+        } else if (allData.active_sessions) {
+          sessions = allData.active_sessions;
+        }
+        let onlineMap = {};
+        const nowTime = Date.now();
+        sessions.forEach((data) => {
+          if (data.username && (nowTime - (data.lastActive || 0) < 90000)) {
+            onlineMap[data.username.toLowerCase()] = true;
+          }
+        });
+        return onlineMap;
       }
     } catch (e) {
-      return {};
+      console.error("Get active sessions error:", e);
     }
     return {};
   }

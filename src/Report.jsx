@@ -1,7 +1,35 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { db } from './firebase';
-import { collection, getDocs, doc, setDoc, query, where } from 'firebase/firestore';
+
+const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
+
+// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
+const logActionToBackend = async (actionText) => {
+  try {
+    const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
+    let activeName = "Admin";
+    
+    if (role === "ADMIN") {
+      activeName = "Admin";
+    } else {
+      try {
+        const activeUser = JSON.parse(localStorage.getItem("ERP_Active_Staff_Data") || "{}");
+        activeName = activeUser?.name || "Staff";
+      } catch (e) {
+        activeName = "Staff";
+      }
+    }
+
+    const formattedAction = `${activeName.toUpperCase()}: ${actionText}`;
+    await fetch(`${BACKEND_URL}/api/logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: formattedAction })
+    });
+  } catch (e) {
+    console.error("Log push error:", e);
+  }
+};
 
 export default function Report({ selectedFY }) {
   const [firms, setFirms] = useState(() => {
@@ -136,7 +164,7 @@ export default function Report({ selectedFY }) {
     }
   };
 
-  // 🟢 LOCALSTORAGE-FIRST FULL SYSTEM BACKUP (0 Firebase Reads!)
+  // 🟢 LOCALSTORAGE-FIRST FULL SYSTEM BACKUP (0 Cloud Reads!)
   const exportFullSystemData = () => {
     try {
       let backupObj = {};
@@ -157,13 +185,14 @@ export default function Report({ selectedFY }) {
       document.body.appendChild(dlAnchor);
       dlAnchor.click();
       dlAnchor.remove();
-      alert('Full System Backup Downloaded Successfully from Local Storage (0 Firebase Reads!)');
+      logActionToBackend("Downloaded full system backup JSON");
+      alert('Full System Backup Downloaded Successfully from Local Storage (0 Cloud Reads!)');
     } catch (err) {
       alert('Backup failed: ' + err.message);
     }
   };
 
-  // 🟢 LOCALSTORAGE-FIRST RESTORE BACKUP (0 Firebase Reads!)
+  // 🟢 LOCALSTORAGE-FIRST RESTORE BACKUP (0 Cloud Reads!)
   const restoreFullSystemData = (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -181,6 +210,7 @@ export default function Report({ selectedFY }) {
             }
           });
           window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'settings' } }));
+          logActionToBackend("Restored full system from backup JSON");
           alert('System Restored Successfully into Local Storage! Reloading application...');
           window.location.reload();
         }
@@ -230,30 +260,39 @@ export default function Report({ selectedFY }) {
     reader.readAsArrayBuffer(selectedFile);
   };
 
-  // 🟢 INDEPENDENT CUSTOMER SYNC & DATE-AWARE CERTIFICATE DUPLICATE CHECK WITH SQLITE IPC
+  // 🟢 INDEPENDENT CUSTOMER SYNC & DATE-AWARE CERTIFICATE DUPLICATE CHECK WITH SQLITE IPC & AWS
   const confirmMirrorImport = async () => {
     setIsSyncing(true);
     try {
       let history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
       let customers = JSON.parse(localStorage.getItem('ERP_Customers_v104') || '[]');
       
-      const existingCertSnap = await getDocs(collection(db, "certificates"));
-      const existingCustSnap = await getDocs(collection(db, "customers"));
-      
-      const cloudCertKeys = new Set();
-      existingCertSnap.forEach(docSnap => {
-        const d = docSnap.data();
-        if (d.party && d.date) {
-          const uniqueKey = `${String(d.party).trim().toLowerCase()}_${String(d.ref || '').trim().toLowerCase()}_${String(d.date).trim()}`;
-          cloudCertKeys.add(uniqueKey);
-        }
-      });
+      const res = await fetch(`${BACKEND_URL}/api/data`);
+      let cloudCertKeys = new Set();
+      let cloudCustNames = new Set();
 
-      const cloudCustNames = new Set();
-      existingCustSnap.forEach(docSnap => {
-        const d = docSnap.data();
-        if (d.name) cloudCustNames.add(String(d.name).trim().toLowerCase());
-      });
+      if (res.ok) {
+        const allData = await res.json();
+        let cloudCerts = [];
+        let cloudCusts = [];
+        if (Array.isArray(allData)) {
+          cloudCerts = allData.filter(item => item.docType === 'certificate');
+          cloudCusts = allData.filter(item => item.docType === 'customer');
+        } else {
+          if (allData.history) cloudCerts = allData.history.filter(item => item.docType === 'certificate');
+          if (allData.customers) cloudCusts = allData.customers;
+        }
+
+        cloudCerts.forEach(d => {
+          if (d.party && d.date) {
+            const uniqueKey = `${String(d.party).trim().toLowerCase()}_${String(d.ref || '').trim().toLowerCase()}_${String(d.date).trim()}`;
+            cloudCertKeys.add(uniqueKey);
+          }
+        });
+        cloudCusts.forEach(d => {
+          if (d.name) cloudCustNames.add(String(d.name).trim().toLowerCase());
+        });
+      }
 
       let importedCertCount = 0;
       let importedCustCount = 0;
@@ -425,7 +464,11 @@ export default function Report({ selectedFY }) {
 
       // 🟢 Sync new items to cloud & local SQLite via IPC with timestamps
       for (let hItem of newHistoryItems) {
-        await setDoc(doc(db, "certificates", String(hItem.id)), hItem);
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'certificates', id: String(hItem.id), data: hItem })
+        });
         localStorage.removeItem(`shaney_certificate_${hItem.id}`);
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
@@ -433,7 +476,11 @@ export default function Report({ selectedFY }) {
         }
       }
       for (let cItem of newCustomerItems) {
-        await setDoc(doc(db, "customers", String(cItem.id)), cItem);
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'customers', id: String(cItem.id), data: cItem })
+        });
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', cItem);
@@ -446,6 +493,7 @@ export default function Report({ selectedFY }) {
       setPreviewModalOpen(false);
       setSelectedFile(null);
       setIsSyncing(false);
+      logActionToBackend(`Imported ${importedCertCount} certificates and ${importedCustCount} customers via Excel`);
       alert(`Sync Complete! Added ${importedCustCount} new customers and ${importedCertCount} new certificates (${skippedCertCount} duplicate certificates skipped).`);
     } catch (err) {
       setIsSyncing(false);
@@ -455,11 +503,16 @@ export default function Report({ selectedFY }) {
 
   const exportMirrorExcel = async () => {
     try {
-      const querySnapshot = await getDocs(collection(db, "certificates"));
+      const res = await fetch(`${BACKEND_URL}/api/data`);
       let history = [];
-      querySnapshot.forEach((docSnap) => {
-        history.push(docSnap.data());
-      });
+      if (res.ok) {
+        const allData = await res.json();
+        if (Array.isArray(allData)) {
+          history = allData.filter(item => item.docType === 'certificate');
+        } else if (allData.history) {
+          history = allData.history.filter(item => item.docType === 'certificate');
+        }
+      }
 
       if (exportFirm !== 'ALL') {
         history = history.filter(h => h.vendor === exportFirm);
@@ -513,6 +566,7 @@ export default function Report({ selectedFY }) {
       const workbook = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(workbook, worksheet, "ERP_Report");
       XLSX.writeFile(workbook, `Shaney_ERP_Cloud_Report_${exportFirm}_${new Date().toISOString().slice(0,10)}.xlsx`);
+      logActionToBackend("Exported cloud report to Excel");
       alert('Excel Report Exported Successfully from Cloud Data!');
     } catch (err) {
       alert('Cloud Export failed: ' + err.message);
@@ -530,7 +584,11 @@ export default function Report({ selectedFY }) {
         if (!item.updatedAt) {
           item.updatedAt = Date.now();
         }
-        await setDoc(doc(db, "certificates", String(item.id)), item);
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'certificates', id: String(item.id), data: item })
+        });
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', item);
@@ -539,6 +597,7 @@ export default function Report({ selectedFY }) {
       }
 
       setIsSyncing(false);
+      logActionToBackend(`Force uploaded ${uploadedCount} local records to cloud`);
       alert(`Success! Force uploaded ${uploadedCount} local records to Cloud with timestamps.`);
     } catch (err) {
       setIsSyncing(false);
@@ -546,58 +605,48 @@ export default function Report({ selectedFY }) {
     }
   };
 
-  // 🟢 FIXED: DOWNLOAD ALL RECORDS WITHOUT UPDATEDAT RESTRICTION
+  // 🟢 TIMESTAMP OPTIMIZED SYNC/DOWNLOAD WITH SQLITE IPC
   const handleCloudDownload = async () => {
     setIsSyncing(true);
     try {
-      const collectionsToSync = [
-        { key: 'ERP_History_v104', col: 'history' },
-        { key: 'ERP_Certificates_v1', col: 'certificates' },
-        { key: 'ERP_Customers_v104', col: 'customers' },
-        { key: 'ERP_Products_v1', col: 'products' },
-        { key: 'ERP_FirmTemplates_v1', col: 'firm_templates' }
-      ];
+      const res = await fetch(`${BACKEND_URL}/api/data`);
+      if (res.ok) {
+        const allData = await res.json();
+        let cloudCerts = [];
+        if (Array.isArray(allData)) {
+          cloudCerts = allData.filter(item => item.docType === 'certificate');
+        } else if (allData.history) {
+          cloudCerts = allData.history.filter(item => item.docType === 'certificate');
+        }
 
-      let totalNewRecords = 0;
+        let history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
+        let newRecordsCount = 0;
 
-      for (let item of collectionsToSync) {
-        const querySnapshot = await getDocs(collection(db, item.col));
-
-        let localData = JSON.parse(localStorage.getItem(item.key) || '[]');
-        let hasChanges = false;
-
-        querySnapshot.forEach((docSnap) => {
-          const cloudData = docSnap.data();
-          hasChanges = true;
-          totalNewRecords++;
-
-          const index = localData.findIndex(h => String(h.id) === String(cloudData.id));
+        cloudCerts.forEach(async (cloudData) => {
+          const index = history.findIndex(h => h.id === cloudData.id);
           if (index !== -1) {
-            localData[index] = cloudData;
+            history[index] = cloudData; 
           } else {
-            localData.push(cloudData);
+            history.push(cloudData); 
           }
 
           if (window.require) {
             const { ipcRenderer } = window.require('electron');
-            if (ipcRenderer) {
-              ipcRenderer.invoke('sqlite-save-record', cloudData).catch(() => {});
-            }
+            if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', cloudData);
           }
+          newRecordsCount++;
         });
 
-        if (hasChanges) {
-          localStorage.setItem(item.key, JSON.stringify(localData));
-        }
+        localStorage.setItem('ERP_History_v104', JSON.stringify(history));
+        window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'certificates' } }));
+
+        setIsSyncing(false);
+        logActionToBackend(`Synced ${newRecordsCount} records from cloud`);
+        alert(`Sync Complete! Downloaded ${newRecordsCount} records from Cloud.`);
+      } else {
+        setIsSyncing(false);
+        alert('Cloud Sync Failed: Server response not ok');
       }
-
-      localStorage.setItem('ERP_Last_Sync_Time', Date.now());
-
-      window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'certificates' } }));
-      window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'settings' } }));
-
-      setIsSyncing(false);
-      alert(`Sync Complete! Successfully downloaded ${totalNewRecords} total records across all collections from Firebase.`);
     } catch (err) {
       setIsSyncing(false);
       alert('Cloud Sync Failed: ' + err.message);
@@ -605,7 +654,8 @@ export default function Report({ selectedFY }) {
   };
 
   return (
-    <div className="w-full relative animate-[fadeIn_0.3s_ease-in-out] pb-10 max-w-7xl mx-auto">
+    <div className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
+      <div className="max-w-7xl mx-auto pb-10">
       
       {isSyncing && (
         <div className="fixed inset-0 bg-slate-950/70 z-[999999] flex flex-col items-center justify-center backdrop-blur-md">
@@ -625,7 +675,7 @@ export default function Report({ selectedFY }) {
               <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
             </div>
             <h3 className="font-black text-slate-700 mb-1 text-sm uppercase">Export Cloud Data</h3>
-            <p className="text-[11px] text-slate-500 mb-4 font-bold">Download data directly from Firebase Cloud to Excel.</p>
+            <p className="text-[11px] text-slate-500 mb-4 font-bold">Download data directly from Cloud to Excel.</p>
 
             <div className="grid grid-cols-1 mb-2">
               <select value={exportFirm} onChange={(e) => setExportFirm(e.target.value)} className="pro-input text-[11px] font-bold bg-white cursor-pointer shadow-sm">
@@ -705,7 +755,7 @@ export default function Report({ selectedFY }) {
           </div>
           <div>
             <h3 className="font-black text-slate-800 text-base uppercase tracking-wide">Master Database & Cloud Controls</h3>
-            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Admin Only: Cloud Backup & Firebase Sync Controls.</p>
+            <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Admin Only: Cloud Backup & Sync Controls.</p>
           </div>
         </div>
 
@@ -728,7 +778,7 @@ export default function Report({ selectedFY }) {
           </button>
 
           <button type="button" onClick={handleCloudDownload} className="w-full bg-[#00a67e] hover:bg-emerald-600 text-white px-4 py-4 rounded-xl font-black text-sm uppercase tracking-widest shadow-lg transition-all flex justify-center items-center gap-3 active:scale-95 cursor-pointer">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg> Sync (Download) From Firebase
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 15a4 4 0 004 4h9a5 5 0 10-.1-9.999 5.002 5.002 0 10-9.78 2.096A4.001 4.001 0 003 15z"/></svg> Sync (Download) From Cloud
           </button>
         </div>
       </div>
@@ -784,6 +834,7 @@ export default function Report({ selectedFY }) {
           </div>
         </div>
       )}
+    </div>
     </div>
   );
 }

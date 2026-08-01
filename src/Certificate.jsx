@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import { toJpeg } from 'html-to-image'; 
-import { db } from './firebase'; // 👈 Firebase instance imported
-import { doc, getDoc, setDoc, deleteDoc } from 'firebase/firestore';
+
+const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
 const getCurrentFY = () => {
   const d = new Date();
@@ -46,8 +46,8 @@ const getFinancialYear = (refStr, dateStr) => {
   }
 };
 
-// 🟢 BULLETPROOF FIREBASE DATA SANITIZER WITH TIMESTAMP FALLBACK
-const sanitizeForFirebase = (dataObj) => {
+// 🟢 BULLETPROOF DATA SANITIZER WITH TIMESTAMP FALLBACK
+const sanitizeForCloud = (dataObj) => {
   let cleaned = { ...dataObj };
   if (!cleaned.updatedAt) {
     cleaned.updatedAt = Date.now(); // 🟢 Timestamp fallback
@@ -72,7 +72,7 @@ const getDynamicPrefix = () => {
   return `SE/${yr1}-${yr2}/101`;
 };
 
-// 🟢 Universal Logging Helper for Admin & Staff Actions
+// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
 const logActionToBackend = async (actionText) => {
   try {
     const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
@@ -90,8 +90,7 @@ const logActionToBackend = async (actionText) => {
     }
 
     const formattedAction = `${activeName.toUpperCase()}: ${actionText}`;
-    const hostname = window.location.hostname;
-    await fetch(`http://${hostname}:5000/api/logs`, {
+    await fetch(`${BACKEND_URL}/api/logs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: formattedAction })
@@ -122,7 +121,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         const saved = localStorage.getItem('ERP_History_v104');
         if (saved) {
           let parsedData = JSON.parse(saved);
-          // 🟢 Migration check for older records missing updatedAt
           parsedData = parsedData.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
           setCertificates(parsedData.filter(b => b.docType === 'certificate'));
         }
@@ -245,14 +243,12 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   const [certificates, setCertificates] = useState(() => {
     let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-    // 🟢 Migration fallback check for old records missing updatedAt
     allHistory = allHistory.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
     return allHistory.filter(b => b.docType === 'certificate');
   });
 
   useEffect(() => {
     let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-    // 🟢 Migration fallback check
     allHistory = allHistory.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
     const certs = allHistory.filter(c => c.docType === 'certificate');
     const others = allHistory.filter(c => c.docType !== 'certificate');
@@ -414,7 +410,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activePreviewCert, setActivePreviewCert] = useState(null);
 
-  // 🟢 CLIENT-SIDE CACHING MECHANISM FOR VIEWER (0 Firebase Reads after 1st load)
+  // 🟢 CLIENT-SIDE CACHING MECHANISM FOR VIEWER (0 AWS Reads after 1st load)
   const handleViewCertificate = async (e, cert) => {
     e.stopPropagation();
     const localKey = `shaney_certificate_${cert.id}`;
@@ -425,11 +421,13 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       if (cached) {
         certToView = JSON.parse(cached);
       } else {
-        const docRef = doc(db, "certificates", String(cert.id));
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          certToView = docSnap.data();
-          localStorage.setItem(localKey, JSON.stringify(certToView));
+        const res = await fetch(`${BACKEND_URL}/api/document/${cert.id}`);
+        if (res.ok) {
+          const cloudData = await res.json();
+          if (cloudData && cloudData.data) {
+            certToView = cloudData.data;
+            localStorage.setItem(localKey, JSON.stringify(certToView));
+          }
         }
       }
     } catch (err) {
@@ -446,18 +444,23 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     const idx = allHistory.findIndex(h => h.id === id);
     if(idx !== -1) {
        allHistory[idx].reminderDone = statusVal;
-       allHistory[idx].updatedAt = Date.now(); // 🟢 Timestamp update
+       allHistory[idx].updatedAt = Date.now();
        localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
        setCertificates(allHistory.filter(b => b.docType === 'certificate'));
        try {
-         await setDoc(doc(db, "certificates", String(id)), sanitizeForFirebase(allHistory[idx]), { merge: true });
+         const sanitized = sanitizeForCloud(allHistory[idx]);
+         await fetch(`${BACKEND_URL}/api/data`, {
+           method: 'POST',
+           headers: { 'Content-Type': 'application/json' },
+           body: JSON.stringify({ type: 'certificates', id: String(id), data: sanitized })
+         });
          localStorage.removeItem(`shaney_certificate_${id}`);
          if (window.require) {
            const { ipcRenderer } = window.require('electron');
            if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
          }
        } catch (err) {
-         console.error("Firebase reminder status update error:", err);
+         console.error("AWS reminder status update error:", err);
        }
     }
   };
@@ -485,18 +488,23 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     
     if (idx !== -1 && type === 'doc') {
       allHistory[idx].whatsappSent = true;
-      allHistory[idx].updatedAt = Date.now(); // 🟢 Timestamp update
+      allHistory[idx].updatedAt = Date.now();
       localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
       setCertificates(allHistory.filter(b => b.docType === 'certificate'));
       try {
-        await setDoc(doc(db, "certificates", String(cert.id)), sanitizeForFirebase(allHistory[idx]), { merge: true });
+        const sanitized = sanitizeForCloud(allHistory[idx]);
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'certificates', id: String(cert.id), data: sanitized })
+        });
         localStorage.removeItem(`shaney_certificate_${cert.id}`);
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
         }
       } catch (err) {
-        console.error("Firebase whatsapp sent update error:", err);
+        console.error("AWS whatsapp sent update error:", err);
       }
       logActionToBackend(`Sent Certificate WhatsApp to ${cert.party} (Ref: ${cert.ref})`);
     }
@@ -654,14 +662,14 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       setSelectedCertIds(selectedCertIds.filter(i => i !== id));
 
       try {
-        await deleteDoc(doc(db, "certificates", String(id)));
+        await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
         localStorage.removeItem(`shaney_certificate_${id}`);
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id, deleted: true, updatedAt: Date.now() });
         }
       } catch (err) {
-        console.error("Firebase delete certificate error:", err);
+        console.error("AWS delete certificate error:", err);
       }
 
       logActionToBackend(`Deleted Certificate Record`);
@@ -698,7 +706,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       
       for (let id of selectedCertIds) {
         try { 
-          await deleteDoc(doc(db, "certificates", String(id))); 
+          await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
           localStorage.removeItem(`shaney_certificate_${id}`);
         } catch(e){}
       }
@@ -714,24 +722,28 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     const idx = allHistory.findIndex(c => c.id === id);
     if (idx !== -1) {
       allHistory[idx].workStatus = newStatus;
-      allHistory[idx].updatedAt = Date.now(); // 🟢 Timestamp update
+      allHistory[idx].updatedAt = Date.now();
       localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
       setCertificates(allHistory.filter(b => b.docType === 'certificate'));
       try {
-        await setDoc(doc(db, "certificates", String(id)), sanitizeForFirebase(allHistory[idx]), { merge: true });
+        const sanitized = sanitizeForCloud(allHistory[idx]);
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'certificates', id: String(id), data: sanitized })
+        });
         localStorage.removeItem(`shaney_certificate_${id}`);
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
         }
       } catch (err) {
-        console.error("Firebase work status update error:", err);
+        console.error("AWS work status update error:", err);
       }
       logActionToBackend(`Updated status of ${allHistory[idx].ref} to ${newStatus}`);
     }
   };
 
-  // 🟢 UPDATED WITH SQLITE IPC AND EXACT TIMESTAMP FOR DELTA SYNC
   const handleSaveCertificate = async (e, directAction = 'save') => {
     e.preventDefault();
     if (!formData.client || !formData.amount) {
@@ -764,13 +776,13 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     const initialPayments = initialPaymentAmount > 0 ? [{ id: Date.now() + 1, amount: initialPaymentAmount, method: formData.payMethod, note: 'Initial payment on generation', date: toDDMMYYYY(getTodayISO()) }] : [];
     
     let targetCertId = editingCertId;
-    const currentTimestamp = Date.now(); // 🟢 Exact Timestamp for Delta Sync
+    const currentTimestamp = Date.now();
     let recordPayload = null;
 
     if (editingCertId) {
       const idx = allHistory.findIndex(x => x.id === editingCertId);
       if(idx !== -1) {
-        recordPayload = sanitizeForFirebase({
+        recordPayload = sanitizeForCloud({
           ...allHistory[idx],
           ref: formData.serialNo,
           party: formData.client,
@@ -784,14 +796,14 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           confirmName: formData.confirmBy,
           collectedName: formData.collectedBy,
           itemsData: JSON.stringify(tableData),
-          updatedAt: currentTimestamp // 🟢 Timestamp update
+          updatedAt: currentTimestamp
         });
         allHistory[idx] = recordPayload;
         logActionToBackend(`Updated Certificate Ref: ${formData.serialNo} for ${formData.client}`);
       }
     } else {
       targetCertId = Date.now().toString();
-      recordPayload = sanitizeForFirebase({
+      recordPayload = sanitizeForCloud({
         id: targetCertId,
         docType: 'certificate',
         ref: formData.serialNo,
@@ -810,7 +822,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         collectedName: formData.collectedBy,
         itemsData: JSON.stringify(tableData),
         payments: initialPayments,
-        updatedAt: currentTimestamp // 🟢 Timestamp created
+        updatedAt: currentTimestamp
       });
       allHistory.push(recordPayload);
       logActionToBackend(`Created Certificate Ref: ${formData.serialNo} for ${formData.client}`);
@@ -819,7 +831,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
     setCertificates(allHistory.filter(b => b.docType === 'certificate'));
     
-    // 🟢 Save directly to local SQLite Database via Electron IPC (0 latency)
     try {
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
@@ -829,6 +840,16 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       }
     } catch (err) {
       console.error("SQLite local save error:", err);
+    }
+
+    try {
+      await fetch(`${BACKEND_URL}/api/data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'certificates', id: String(targetCertId), data: recordPayload })
+      });
+    } catch (err) {
+      console.error("AWS background save error:", err);
     }
 
     if (targetCertId) {
@@ -867,7 +888,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       const newPayment = { id: Date.now(), amount: Number(paymentForm.amount), method: paymentForm.method, note: paymentForm.note, date: toDDMMYYYY(getTodayISO()) };
       if (!allHistory[idx].payments) allHistory[idx].payments = [];
       allHistory[idx].payments.push(newPayment);
-      allHistory[idx].updatedAt = Date.now(); // 🟢 Timestamp update
+      allHistory[idx].updatedAt = Date.now();
       
       const totalPaid = allHistory[idx].payments.reduce((s, p) => s + Number(p.amount), 0);
       if (totalPaid >= allHistory[idx].total) {
@@ -880,14 +901,19 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       setPaymentForm({ amount: '', method: paymentMethods[0] || 'CASH', note: '' });
       
       try {
-        await setDoc(doc(db, "certificates", String(activeCert.id)), sanitizeForFirebase(allHistory[idx]), { merge: true });
+        const sanitized = sanitizeForCloud(allHistory[idx]);
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'certificates', id: String(activeCert.id), data: sanitized })
+        });
         localStorage.removeItem(`shaney_certificate_${activeCert.id}`);
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
         }
       } catch (err) {
-        console.error("Firebase payment add error:", err);
+        console.error("AWS payment add error:", err);
       }
 
       logActionToBackend(`Added Payment of ₹${paymentForm.amount} for ${activeCert.ref}`);
@@ -902,7 +928,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       if (idx !== -1) {
         const updatedPayments = allHistory[idx].payments.filter(p => p.id !== paymentId);
         allHistory[idx].payments = updatedPayments;
-        allHistory[idx].updatedAt = Date.now(); // 🟢 Timestamp update
+        allHistory[idx].updatedAt = Date.now();
         
         const paidTotal = updatedPayments.reduce((sum, p) => sum + Number(p.amount), 0);
         if (paidTotal < allHistory[idx].total) {
@@ -914,14 +940,19 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         setActiveCert(allHistory[idx]);
         
         try {
-          await setDoc(doc(db, "certificates", String(activeCert.id)), sanitizeForFirebase(allHistory[idx]), { merge: true });
+          const sanitized = sanitizeForCloud(allHistory[idx]);
+          await fetch(`${BACKEND_URL}/api/data`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'certificates', id: String(activeCert.id), data: sanitized })
+          });
           localStorage.removeItem(`shaney_certificate_${activeCert.id}`);
           if (window.require) {
             const { ipcRenderer } = window.require('electron');
             if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
           }
         } catch (err) {
-          console.error("Firebase payment delete error:", err);
+          console.error("AWS payment delete error:", err);
         }
 
         logActionToBackend(`Deleted payment entry for ${activeCert.ref}`);
@@ -1180,8 +1211,8 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   };
 
   return (
-    <div className="w-full relative">
-      <div className="app-ui animate-[fadeIn_0.3s_ease-in-out] w-full max-w-full pb-10">
+    <div id="tab-certificate" className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
+      <div className="max-w-7xl mx-auto pb-10">
 
         {isPreviewOpen && activePreviewCert && (
           <div className="fixed inset-0 z-[9999] flex justify-end bg-slate-900/70 backdrop-blur-sm transition-all duration-300">
@@ -1206,7 +1237,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                 </button>
                 <div className="flex gap-2 w-full sm:w-auto">
                   <button onClick={(e) => handleWhatsAppSend(e, activePreviewCert, 'doc')} className="flex-1 sm:flex-none bg-[#25D366] text-white hover:bg-green-600 px-5 py-2.5 rounded-lg text-xs font-black uppercase transition-all shadow-md flex items-center justify-center gap-2">
-                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                     WhatsApp
                   </button>
                   <button onClick={() => {
@@ -1596,7 +1627,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                             {c.whatsappSent && (
                               <span className="inline-flex items-center bg-green-100 text-green-700 p-0.5 rounded" title="WhatsApp Sent">
                                 <svg className="w-3 h-3 fill-current text-green-600 shrink-0" viewBox="0 0 24 24">
-                                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
                                 </svg>
                               </span>
                             )}
@@ -1659,7 +1690,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                             </button>
                             <button onClick={(e) => handleWhatsAppSend(e, c, 'doc')} className="flex items-center gap-1 bg-[#25D366] hover:bg-green-600 text-white px-2 py-1.5 rounded transition-colors shadow-sm font-bold text-[10px]" title="Send WhatsApp">
                               <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24">
-                                <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                                <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
                               </svg>
                               WA
                             </button>
@@ -1755,7 +1786,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                           <h4 className="font-black text-slate-900 text-sm uppercase">{c.party}</h4>
                           {c.whatsappSent && (
                             <span className="inline-flex items-center bg-green-100 text-green-700 p-1 rounded" title="WhatsApp Sent">
-                              <svg className="w-3.5 h-3.5 fill-current text-green-600 shrink-0 inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                              <svg className="w-3.5 h-3.5 fill-current text-green-600 shrink-0 inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                             </span>
                           )}
                         </div>
@@ -1825,7 +1856,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                         </button>
                         <button onClick={(e) => handleWhatsAppSend(e, c, 'doc')} className="flex-1 bg-[#25D366] text-white py-2 px-1 rounded-lg text-[10px] font-black uppercase transition-colors text-center flex items-center justify-center gap-1">
                           <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24">
-                            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                            <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
                           </svg>
                           WA
                         </button>
@@ -1929,7 +1960,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                       <svg className="w-3.5 h-3.5 text-indigo-700 inline-block shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4"/></svg> ADD PAYMENT RECEIPT
                     </h4>
                     <button onClick={(e) => handleWhatsAppSend(e, activeCert, 'payment')} className="bg-[#25D366] hover:bg-green-600 text-white text-[9px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider transition-all shadow-sm flex items-center gap-1.5">
-                      <svg className="w-3 h-3 fill-current inline shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                      <svg className="w-3 h-3 fill-current inline shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                       <span>Send Due Reminder WA</span>
                     </button>
                   </div>

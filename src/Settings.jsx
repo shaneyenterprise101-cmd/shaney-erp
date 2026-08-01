@@ -1,6 +1,34 @@
 import React, { useState, useEffect } from 'react';
-import { db } from './firebase';
-import { doc, setDoc, deleteDoc, collection, getDocs } from 'firebase/firestore';
+
+const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
+
+// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
+const logActionToBackend = async (actionText) => {
+  try {
+    const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
+    let activeName = "Admin";
+    
+    if (role === "ADMIN") {
+      activeName = "Admin";
+    } else {
+      try {
+        const activeUser = JSON.parse(localStorage.getItem("ERP_Active_Staff_Data") || "{}");
+        activeName = activeUser?.name || "Staff";
+      } catch (e) {
+        activeName = "Staff";
+      }
+    }
+
+    const formattedAction = `${activeName.toUpperCase()}: ${actionText}`;
+    await fetch(`${BACKEND_URL}/api/logs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: formattedAction })
+    });
+  } catch (e) {
+    console.error("Log push error:", e);
+  }
+};
 
 export default function Settings() {
   const [firms, setFirms] = useState(() => {
@@ -60,7 +88,7 @@ export default function Settings() {
         setTimer((prev) => prev - 1);
       }, 1000);
     } else if (timer === 0 && showQrModal) {
-      setShowQrModal(false); // 10 sec baad window close ho jayegi
+      setShowQrModal(false); 
     }
     return () => clearInterval(interval);
   }, [showQrModal, timer]);
@@ -78,7 +106,7 @@ export default function Settings() {
     }
     setShowPhoneModal(false);
     setConnectedPhone(phoneNumber.trim());
-    setTimer(10); // Reset timer to 10s
+    setTimer(10); 
     setWaQrCode('');
     setShowQrModal(true);
     
@@ -167,17 +195,29 @@ export default function Settings() {
     }
   });
 
+  // 🟢 Cloud Sync for Staff List via Render Backend
   useEffect(() => {
     try {
       localStorage.setItem('ERP_Staff_v104', JSON.stringify(staffList));
-      setDoc(doc(db, "settings", "staff_list"), { staffList, updatedAt: Date.now() }, { merge: true }).catch(e => {});
+      const staffPayload = { id: 'staff_list', docType: 'setting', staffList, updatedAt: Date.now() };
+      fetch(`${BACKEND_URL}/api/data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'settings', id: 'staff_list', data: staffPayload })
+      }).catch(e => {});
     } catch(e) {}
   }, [staffList]);
 
+  // 🟢 Cloud Sync for Payment Methods via Render Backend
   useEffect(() => {
     try {
       localStorage.setItem('ERP_PayMethods_v104', JSON.stringify(paymentMethods));
-      setDoc(doc(db, "settings", "payment_methods"), { paymentMethods, updatedAt: Date.now() }, { merge: true }).catch(e => {});
+      const payPayload = { id: 'payment_methods', docType: 'setting', paymentMethods, updatedAt: Date.now() };
+      fetch(`${BACKEND_URL}/api/data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'settings', id: 'payment_methods', data: payPayload })
+      }).catch(e => {});
     } catch(e) {}
   }, [paymentMethods]);
 
@@ -187,6 +227,53 @@ export default function Settings() {
       localStorage.setItem('ERP_WA_Templates_v104', JSON.stringify(waTemplates));
     } catch(e) {}
   }, [waMethod, waTemplates]);
+
+  // 🟢 Fetch Companies, Staff, and Payment Methods from Cloud on Load
+  useEffect(() => {
+    const fetchCloudSettings = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/data`);
+        if (res.ok) {
+          const allData = await res.json();
+          if (allData && typeof allData === 'object') {
+            let cloudFirms = [];
+            let cloudStaff = [];
+            let cloudPay = [];
+
+            if (Array.isArray(allData)) {
+              cloudFirms = allData.filter(item => item.docType === 'company');
+              const staffDoc = allData.find(item => item.id === 'staff_list');
+              if (staffDoc && staffDoc.staffList) cloudStaff = staffDoc.staffList;
+              const payDoc = allData.find(item => item.id === 'payment_methods');
+              if (payDoc && payDoc.paymentMethods) cloudPay = payDoc.paymentMethods;
+            } else {
+              if (allData.companies) cloudFirms = allData.companies;
+              if (allData.settings) {
+                if (allData.settings.staff_list) cloudStaff = allData.settings.staff_list;
+                if (allData.settings.payment_methods) cloudPay = allData.settings.payment_methods;
+              }
+            }
+
+            if (cloudFirms.length > 0) {
+              setFirms(cloudFirms);
+              localStorage.setItem('ERP_Companies_v104', JSON.stringify(cloudFirms));
+            }
+            if (cloudStaff.length > 0) {
+              setStaffList(cloudStaff);
+              localStorage.setItem('ERP_Staff_v104', JSON.stringify(cloudStaff));
+            }
+            if (cloudPay.length > 0) {
+              setPaymentMethods(cloudPay);
+              localStorage.setItem('ERP_PayMethods_v104', JSON.stringify(cloudPay));
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Error fetching settings from cloud:", err);
+      }
+    };
+    fetchCloudSettings();
+  }, []);
 
   const handleSelectFirm = (e) => {
     const id = e.target.value;
@@ -239,24 +326,36 @@ export default function Settings() {
       localStorage.setItem('ERP_Companies_v104', JSON.stringify(updatedFirms));
       setSelectedFirmId(newComp.id);
       try {
-        await setDoc(doc(db, "companies", String(newComp.id)), newComp);
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'companies', id: String(newComp.id), data: newComp })
+        });
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', newComp);
         }
-        alert('✅ New Firm Profile Created & Saved!');
+        window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'settings' } }));
+        logActionToBackend(`Created Firm Profile: ${newComp.name}`);
+        alert('✅ New Firm Profile Created & Saved to Cloud!');
       } catch (err) { alert('✅ Created locally, cloud sync failed.'); }
     } else {
       const updatedFirms = firms.map(f => f.id === selectedFirmId ? newComp : f);
       setFirms(updatedFirms);
       localStorage.setItem('ERP_Companies_v104', JSON.stringify(updatedFirms));
       try {
-        await setDoc(doc(db, "companies", String(selectedFirmId)), newComp, { merge: true });
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'companies', id: String(selectedFirmId), data: newComp })
+        });
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', newComp);
         }
-        alert('✅ Firm Profile Updated!');
+        window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'settings' } }));
+        logActionToBackend(`Updated Firm Profile: ${newComp.name}`);
+        alert('✅ Firm Profile Updated & Synced to Cloud!');
       } catch (err) { alert('✅ Updated locally.'); }
     }
   };
@@ -268,11 +367,17 @@ export default function Settings() {
       setFirms(updatedFirms);
       localStorage.setItem('ERP_Companies_v104', JSON.stringify(updatedFirms));
       try {
-        await deleteDoc(doc(db, "companies", String(selectedFirmId)));
+        await fetch(`${BACKEND_URL}/api/data/${selectedFirmId}`, { method: 'DELETE' });
+        if (window.require) {
+          const { ipcRenderer } = window.require('electron');
+          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id: selectedFirmId, deleted: true, updatedAt: Date.now() });
+        }
+        window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'settings' } }));
+        logActionToBackend(`Deleted Firm Profile ID: ${selectedFirmId}`);
       } catch (e) {}
       setSelectedFirmId('');
       setFirmName(''); setFirmAddress(''); setFirmContact(''); setFirmPrefix('');
-      alert('🗑️ Firm Deleted!');
+      alert('🗑️ Firm Deleted Successfully!');
     }
   };
 
@@ -282,11 +387,15 @@ export default function Settings() {
     const formatted = newStaff.trim().toUpperCase();
     if (!staffList.includes(formatted)) {
       setStaffList([...staffList, formatted]);
+      logActionToBackend(`Added staff member: ${formatted}`);
     }
     setNewStaff('');
   };
 
-  const removeStaff = (s) => setStaffList(staffList.filter(x => x !== s));
+  const removeStaff = (s) => {
+    setStaffList(staffList.filter(x => x !== s));
+    logActionToBackend(`Removed staff member: ${s}`);
+  };
 
   const handleAddMethod = (e) => {
     e.preventDefault();
@@ -294,16 +403,21 @@ export default function Settings() {
     const formatted = newMethod.trim().toUpperCase();
     if (!paymentMethods.includes(formatted)) {
       setPaymentMethods([...paymentMethods, formatted]);
+      logActionToBackend(`Added payment method: ${formatted}`);
     }
     setNewMethod('');
   };
 
-  const removeMethod = (m) => setPaymentMethods(paymentMethods.filter(x => x !== m));
+  const removeMethod = (m) => {
+    setPaymentMethods(paymentMethods.filter(x => x !== m));
+    logActionToBackend(`Removed payment method: ${m}`);
+  };
 
   const filteredLogs = waLogs.filter(l => l.receiver.includes(searchLog) || l.status.toLowerCase().includes(searchLog.toLowerCase()));
 
   return (
-    <div className="animate-[fadeIn_0.3s_ease-in-out] max-w-4xl mx-auto flex flex-col gap-6 pb-10">
+    <div className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
+      <div className="max-w-4xl mx-auto flex flex-col gap-6 pb-10">
       
       {/* WhatsApp Settings */}
       <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
@@ -598,6 +712,59 @@ export default function Settings() {
         </form>
       </div>
 
+      {/* 👨‍💼 STAFF MANAGEMENT */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+        <h4 className="font-black text-xs text-slate-800 uppercase mb-4 border-b border-slate-100 pb-3">👨‍💼 Manage Staff / Employees</h4>
+        
+        <form onSubmit={handleAddStaff} className="flex gap-2 mb-4">
+          <input 
+            type="text" 
+            value={newStaff}
+            onChange={(e) => setNewStaff(e.target.value)}
+            className="pro-input text-xs w-full shadow-inner bg-slate-50 font-bold" 
+            placeholder="Type new staff name (e.g. Rahul)..." 
+          />
+          <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md transition-colors whitespace-nowrap cursor-pointer">
+            ➕ Add Staff
+          </button>
+        </form>
+
+        <div className="flex flex-wrap gap-2">
+          {staffList.map((staff) => (
+            <span key={staff} className="bg-slate-100 border border-slate-200 text-slate-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm">
+              {staff} <button type="button" onClick={() => removeStaff(staff)} className="text-red-500 hover:text-red-700 font-black cursor-pointer">&times;</button>
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* 💳 PAYMENT METHODS */}
+      <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+        <h4 className="font-black text-xs text-slate-800 uppercase mb-4 border-b border-slate-100 pb-3">💳 Manage Payment Methods</h4>
+        
+        <form onSubmit={handleAddMethod} className="flex gap-2 mb-4">
+          <input 
+            type="text" 
+            value={newMethod}
+            onChange={(e) => setNewMethod(e.target.value)}
+            className="pro-input text-xs w-full shadow-inner bg-slate-50 font-bold" 
+            placeholder="Type new payment method (e.g. UPI, Cash)..." 
+          />
+          <button type="submit" className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-lg text-[10px] font-black uppercase shadow-md transition-colors whitespace-nowrap cursor-pointer">
+            ➕ Add Method
+          </button>
+        </form>
+
+        <div className="flex flex-wrap gap-2">
+          {paymentMethods.map((method) => (
+            <span key={method} className="bg-slate-100 border border-slate-200 text-slate-800 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm">
+              {method} <button type="button" onClick={() => removeMethod(method)} className="text-red-500 hover:text-red-700 font-black cursor-pointer">&times;</button>
+            </span>
+          ))}
+        </div>
+      </div>
+
     </div>
+  </div>
   );
 }
