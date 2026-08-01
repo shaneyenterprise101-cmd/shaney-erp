@@ -16,7 +16,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// 🟢 Load existing logs from file on startup
+// 📂 Load existing logs from file on startup
 let officeLogs = [];
 if (fs.existsSync(LOG_FILE)) {
     try {
@@ -35,7 +35,7 @@ const saveLogsToFile = () => {
     }
 };
 
-// 🟢 Load Master State Data from file
+// 📂 Load Master State Data from file
 let masterState = {};
 if (fs.existsSync(DATA_FILE)) {
     try {

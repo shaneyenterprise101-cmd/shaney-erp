@@ -5,7 +5,9 @@ import gujaratGeoJson from '../gujarat.json';
 import { db } from './firebase';
 import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
 
+// Sahi tarika (Full Render URL use karein)
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
+const logRes = await fetch(`${BACKEND_URL}/api/logs`);
 
 if (typeof highchartsMap === 'function') {
   highchartsMap(Highcharts);
