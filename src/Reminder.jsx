@@ -62,7 +62,7 @@ export default function Reminder({ selectedFY }) {
   
   // 🟢 Pagination State for Reminders
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10;
+  const rowsPerPage = 10; // 🟢 Set to 10 rows per page
   
   // Modal State for Non-Returning / Permanent Closed Customers
   const [isNeverReturnModalOpen, setIsNeverReturnModalOpen] = useState(false);
@@ -283,7 +283,10 @@ export default function Reminder({ selectedFY }) {
     const template = localStorage.getItem("waTempExpiry") || "Hello {name},\n\nThis is a gentle reminder that your Fire Safety Certificate (Ref: {ref}) is valid up to {date}.\n\n📄 View Document:\n🔗 {docLink}";
     const msg = template.replace("{name}", cert.party).replace("{ref}", cert.ref).replace("{date}", cert.validDate).replace("{docLink}", docLink);
     
-    window.open(`https://wa.me/${phone ? '91'+phone.replace(/\D/g,'') : ''}?text=${encodeURIComponent(msg)}`, '_blank');
+    // 🟢 1 Second delay before opening WhatsApp as requested
+    setTimeout(() => {
+      window.open(`https://wa.me/${phone ? '91'+phone.replace(/\D/g,'') : ''}?text=${encodeURIComponent(msg)}`, '_blank');
+    }, 1000);
   };
 
   const setNeverReturnStatus = async (e, id, statusVal) => {

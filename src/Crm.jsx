@@ -121,7 +121,7 @@ export default function Crm({ selectedFY }) {
   const [isImporting, setIsImporting] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 15;
+  const rowsPerPage = 10; // 🟢 Set to 10 rows per page
 
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkStaff, setBulkStaff] = useState('');
@@ -663,7 +663,12 @@ export default function Crm({ selectedFY }) {
     }
 
     logActionToBackend(`SENT CRM WHATSAPP MESSAGE TO ${companyName} -> ${contactLabel}`);
-    window.open('https://wa.me/91' + cleanPhone, '_blank');
+    
+    // 🟢 1 Second delay before opening WhatsApp as requested
+    setTimeout(() => {
+      window.open('https://wa.me/91' + cleanPhone, '_blank');
+    }, 1000);
+
     setWaModalOpen(false);
   };
 
@@ -1411,7 +1416,7 @@ export default function Crm({ selectedFY }) {
                                     </span>
                                   )}
                                 </div>
-                                <span className="font-mono text-slate-600 font-bold text-xs">{c.m1 || 'No Number'}</span>
+                                <span className="font-mono text-slate-600 font-bold text-xs">{c.m1}</span>
                               </div>
                               <button type="button" onClick={() => triggerCall(c.m1, 'm1', c.id)} className="bg-blue-600 text-white px-3 py-1.5 rounded-lg font-black text-[10px] uppercase shadow-sm">CALL</button>
                             </div>

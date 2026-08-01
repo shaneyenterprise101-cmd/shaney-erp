@@ -97,7 +97,7 @@ export default function Product() {
 
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10;
+  const rowsPerPage = 10; // 🟢 Set to 10 rows per page
 
   // Mobile Floating Search State
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);

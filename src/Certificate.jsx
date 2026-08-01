@@ -111,7 +111,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   }, [initialViewMode]);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10;
+  const rowsPerPage = 10; // 🟢 Updated to 10 rows per page
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
   // 🟢 REAL-TIME LIVE SYNC LISTENER (App.jsx broadcast catcher)
@@ -524,7 +524,11 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     }
 
     const waUrl = `https://wa.me/${phone ? '91'+phone.replace(/\D/g,'') : ''}?text=${encodeURIComponent(msg)}`;
-    window.open(waUrl, '_blank');
+    
+    // 🟢 1 Second delay before opening WhatsApp as requested
+    setTimeout(() => {
+      window.open(waUrl, '_blank');
+    }, 1000);
   };
 
   const executeDocumentAction = async (actionType, elementId, filename) => {
