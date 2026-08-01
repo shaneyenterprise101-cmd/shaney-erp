@@ -10,12 +10,19 @@ let activeSessions = {}; // { username: timestamp }
 const LOG_FILE = './office_logs.json';
 const DATA_FILE = './master_state.json';
 
+// Request logging middleware for debugging on Render
+app.use((req, res, next) => {
+    console.log(`📥 [${new Date().toISOString()}] ${req.method} ${req.url}`);
+    next();
+});
+
 // 🟢 Load existing logs from file on startup
 let officeLogs = [];
 if (fs.existsSync(LOG_FILE)) {
     try {
         officeLogs = JSON.parse(fs.readFileSync(LOG_FILE, 'utf8'));
     } catch (e) {
+        console.error("Error reading log file, initializing empty array:", e);
         officeLogs = [];
     }
 }
@@ -34,6 +41,7 @@ if (fs.existsSync(DATA_FILE)) {
     try {
         masterState = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     } catch (e) {
+        console.error("Error reading master state file, initializing empty object:", e);
         masterState = {};
     }
 }
@@ -139,7 +147,7 @@ app.post('/api/logs', (req, res) => {
     }
 });
 
-// 5. Get Master State Data API (Safely Handled)
+// 5. Get Master State Data API
 app.get('/api/data', (req, res) => {
     try {
         const { key } = req.query;
@@ -154,7 +162,7 @@ app.get('/api/data', (req, res) => {
     }
 });
 
-// 6. Save Data API (Safely Handled)
+// 6. Save Data API
 app.post('/api/data', (req, res) => {
     try {
         const { key, item } = req.body;
@@ -182,7 +190,7 @@ app.post('/api/data', (req, res) => {
     }
 });
 
-// 7. Delete Data API (Safely Handled)
+// 7. Delete Data API
 app.post('/api/data/delete', (req, res) => {
     try {
         const { key, itemId } = req.body;
@@ -233,7 +241,6 @@ app.get('/api/document/:id', (req, res) => {
     }
 });
 
-// Server listen on Render PORT or default 5000
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🖥️ Shaney ERP Backend Server running on port ${PORT}`);
