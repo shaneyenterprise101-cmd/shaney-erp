@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import fs from 'fs';
-import path from 'path';
 
 const app = express();
 app.use(cors());
@@ -9,8 +8,9 @@ app.use(express.json());
 
 let activeSessions = {}; // { username: timestamp }
 const LOG_FILE = './office_logs.json';
+const DATA_FILE = './master_state.json';
 
-// 🟢 Load existing logs from file on startup so data is never lost
+// 🟢 Load existing logs from file on startup
 let officeLogs = [];
 if (fs.existsSync(LOG_FILE)) {
     try {
@@ -20,7 +20,6 @@ if (fs.existsSync(LOG_FILE)) {
     }
 }
 
-// Helper to save logs permanently to disk
 const saveLogsToFile = () => {
     try {
         fs.writeFileSync(LOG_FILE, JSON.stringify(officeLogs, null, 2));
@@ -28,6 +27,29 @@ const saveLogsToFile = () => {
         console.error("Error saving logs to file:", e);
     }
 };
+
+// 🟢 Load Master State Data from file (Replaces Firebase database storage)
+let masterState = {};
+if (fs.existsSync(DATA_FILE)) {
+    try {
+        masterState = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    } catch (e) {
+        masterState = {};
+    }
+}
+
+const saveMasterStateToFile = () => {
+    try {
+        fs.writeFileSync(DATA_FILE, JSON.stringify(masterState, null, 2));
+    } catch (e) {
+        console.error("Error saving master state to file:", e);
+    }
+};
+
+// 0. Root Route (Fixes "Cannot GET /" error on browser)
+app.get('/', (req, res) => {
+    res.send('🚀 Shaney ERP Backend is Live and Running!');
+});
 
 // 1. Heartbeat API for Online/Offline Status
 app.post('/api/heartbeat', (req, res) => {
@@ -50,7 +72,7 @@ app.get('/api/sessions', (req, res) => {
     res.json(onlineUsers);
 });
 
-// 3. Get Live Office Feed Logs (with optional date & staff filters)
+// 3. Get Live Office Feed Logs
 app.get('/api/logs', (req, res) => {
     const { staff, date } = req.query;
     let filtered = officeLogs;
@@ -65,15 +87,14 @@ app.get('/api/logs', (req, res) => {
     res.json(filtered);
 });
 
-// 4. Post New Office Live Log (Saves permanently with Date & Staff tracking)
+// 4. Post New Office Live Log
 app.post('/api/logs', (req, res) => {
     const { action, staff } = req.body;
     if (action) {
         const now = new Date();
-        const dateStr = now.toLocaleDateString('en-GB'); // Format: DD/MM/YYYY
+        const dateStr = now.toLocaleDateString('en-GB'); 
         const timeStr = now.toLocaleTimeString();
 
-        // Extract staff name from action string if formatted as "STAFF: action" or passed separately
         let staffName = staff || 'ADMIN';
         let cleanAction = action;
 
@@ -92,16 +113,88 @@ app.post('/api/logs', (req, res) => {
         };
 
         officeLogs.unshift(newLog);
-        
-        // Keep up to 10,000 logs safely stored on disk for long-term daily history
         if (officeLogs.length > 10000) officeLogs.pop(); 
-        
         saveLogsToFile();
     }
     res.json({ success: true, logs: officeLogs });
 });
 
-// Server listen on all network interfaces (Port 5000)
-app.listen(5000, '0.0.0.0', () => {
-    console.log('🖥️ Daily Persistent Backend Server running on port 5000');
+// 5. Get Master State Data API (For SyncManager sync)
+app.get('/api/data', (req, res) => {
+    const { key } = req.query;
+    if (!key) {
+        return res.status(400).json({ error: 'Storage key required' });
+    }
+    const data = masterState[key] || [];
+    res.json({ success: true, data });
+});
+
+// 6. Save Data API (For SyncManager saveData)
+app.post('/api/data', (req, res) => {
+    const { key, item } = req.body;
+    if (!key || !item) {
+        return res.status(400).json({ error: 'Key and item required' });
+    }
+
+    if (!masterState[key]) {
+        masterState[key] = [];
+    }
+
+    let list = masterState[key];
+    const index = list.findIndex(i => String(i.id) === String(item.id));
+    if (index !== -1) {
+        list[index] = item;
+    } else {
+        list.push(item);
+    }
+
+    saveMasterStateToFile();
+    res.json({ success: true });
+});
+
+// 7. Delete Data API (For SyncManager deleteData)
+app.post('/api/data/delete', (req, res) => {
+    const { key, itemId } = req.body;
+    if (!key || !itemId) {
+        return res.status(400).json({ error: 'Key and itemId required' });
+    }
+
+    if (masterState[key]) {
+        masterState[key] = masterState[key].filter(i => String(i.id) !== String(itemId));
+        saveMasterStateToFile();
+    }
+
+    res.json({ success: true });
+});
+
+// 8. Public Document Preview API
+app.get('/api/document/:id', (req, res) => {
+    const docId = req.params.id;
+    let foundDoc = null;
+
+    for (const [key, list] of Object.entries(masterState)) {
+        if (Array.isArray(list)) {
+            const match = list.find(item => String(item.id) === String(docId));
+            if (match) {
+                const isQuote = key.includes('quotation') || match.type === 'quotation';
+                foundDoc = {
+                    type: isQuote ? 'quotation' : 'certificate',
+                    data: match
+                };
+                break;
+            }
+        }
+    }
+
+    if (foundDoc) {
+        res.json(foundDoc);
+    } else {
+        res.status(404).json({ error: 'Document not found' });
+    }
+});
+
+// Server listen on Render PORT or default 5000
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`🖥️ Shaney ERP Backend Server running on port ${PORT}`);
 });
