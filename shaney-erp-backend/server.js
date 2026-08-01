@@ -147,12 +147,13 @@ app.post('/api/logs', (req, res) => {
     }
 });
 
-// 5. Get Master State Data API
+// 5. Get Master State Data API (Flexible: supports ?key=... or returns full state)
 app.get('/api/data', (req, res) => {
     try {
         const { key } = req.query;
         if (!key) {
-            return res.status(400).json({ success: false, error: 'Storage key required' });
+            // Return full masterState object or flatten into array if requested without key
+            return res.json(masterState);
         }
         const data = masterState[key] || [];
         res.json({ success: true, data });
@@ -162,24 +163,37 @@ app.get('/api/data', (req, res) => {
     }
 });
 
-// 6. Save Data API
+// 6. Save Data API (Flexible: supports both {key, item} and {type, id, data})
 app.post('/api/data', (req, res) => {
     try {
-        const { key, item } = req.body;
-        if (!key || !item) {
-            return res.status(400).json({ success: false, error: 'Key and item required' });
+        const key = req.body.key || req.body.type || 'general';
+        let item = req.body.item || req.body.data;
+        
+        if (!item) {
+            item = req.body; // Fallback to entire body if data/item is missing
+        }
+
+        // Ensure item has an ID if provided separately
+        if (req.body.id && item && typeof item === 'object' && !item.id) {
+            item.id = req.body.id;
         }
 
         if (!masterState[key]) {
             masterState[key] = [];
         }
 
-        let list = masterState[key];
-        const index = list.findIndex(i => String(i.id) === String(item.id));
-        if (index !== -1) {
-            list[index] = item;
+        if (Array.isArray(masterState[key]) && item && item.id) {
+            let list = masterState[key];
+            const index = list.findIndex(i => String(i.id) === String(item.id));
+            if (index !== -1) {
+                list[index] = item;
+            } else {
+                list.push(item);
+            }
+        } else if (Array.isArray(masterState[key])) {
+            masterState[key].push(item);
         } else {
-            list.push(item);
+            masterState[key] = item;
         }
 
         saveMasterStateToFile();
@@ -190,11 +204,11 @@ app.post('/api/data', (req, res) => {
     }
 });
 
-// 7. Universal History & Sync Handlers (Prevents 404 errors)
+// 7. Universal History & Sync Handlers
 const handleUniversalSave = (req, res) => {
     try {
-        const item = req.body.item || req.body;
-        const key = req.body.key || 'ERP_History_v104';
+        const item = req.body.item || req.body.data || req.body;
+        const key = req.body.key || req.body.type || 'ERP_History_v104';
         
         if (!masterState[key]) {
             masterState[key] = [];
@@ -248,7 +262,7 @@ app.get('/api/document/:id', (req, res) => {
 
         for (const [key, list] of Object.entries(masterState)) {
             if (Array.isArray(list)) {
-                const match = list.file ? null : list.find(item => String(item.id) === String(docId));
+                const match = list.find(item => item && String(item.id) === String(docId));
                 if (match) {
                     const isQuote = key.includes('quotation') || match.type === 'quotation';
                     foundDoc = {
@@ -271,7 +285,7 @@ app.get('/api/document/:id', (req, res) => {
     }
 });
 
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🖥️ Shaney ERP Backend Server running on port ${PORT}`);
 });
