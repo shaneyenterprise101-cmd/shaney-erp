@@ -10,7 +10,7 @@ let activeSessions = {}; // { username: timestamp }
 const LOG_FILE = './office_logs.json';
 const DATA_FILE = './master_state.json';
 
-// Request logging middleware for debugging
+// Request logging middleware
 app.use((req, res, next) => {
     console.log(`📥 [${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
@@ -61,7 +61,7 @@ app.get('/', (req, res) => {
     }
 });
 
-// 1. Heartbeat API for Online/Offline Status
+// 1. Heartbeat API
 app.post('/api/heartbeat', (req, res) => {
     try {
         const username = req.body.username || req.body.user;
@@ -160,7 +160,7 @@ app.get('/api/data', (req, res) => {
     }
 });
 
-// 6. Save Data API
+// 6. Save Data API (Handles /api/data)
 app.post('/api/data', (req, res) => {
     try {
         const { key, item } = req.body;
@@ -188,14 +188,16 @@ app.post('/api/data', (req, res) => {
     }
 });
 
-// 7. Explicit History Endpoint (Prevents 404 if SyncManager calls /api/history)
-app.post('/api/history', (req, res) => {
+// 7. Universal Sync / History Handler (Catches /api/history, /api/sync, etc.)
+const handleUniversalSave = (req, res) => {
     try {
         const item = req.body.item || req.body;
-        const key = 'ERP_History_v104';
+        const key = req.body.key || 'ERP_History_v104';
+        
         if (!masterState[key]) {
             masterState[key] = [];
         }
+        
         if (item && item.id) {
             let list = masterState[key];
             const index = list.findIndex(i => String(i.id) === String(item.id));
@@ -208,10 +210,13 @@ app.post('/api/history', (req, res) => {
         }
         res.json({ success: true });
     } catch (err) {
-        console.error("POST /api/history error:", err);
+        console.error("Universal Save error:", err);
         res.status(500).json({ success: false, error: err.message });
     }
-});
+};
+
+app.post('/api/history', handleUniversalSave);
+app.post('/api/sync', handleUniversalSave);
 
 // 8. Delete Data API
 app.post('/api/data/delete', (req, res) => {
