@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { db } from './firebase'; // 👈 Firebase instance imported
+import { db } from './firebase'; 
 import { doc, setDoc, deleteDoc, collection, onSnapshot } from 'firebase/firestore';
 
-// 🟢 Universal Logging Helper for Admin & Staff Actions
+const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
+
+// 🟢 Universal Logging Helper for Admin & Staff Actions (Fixed with Render URL)
 const logActionToBackend = async (actionText) => {
   try {
     const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
@@ -21,8 +23,7 @@ const logActionToBackend = async (actionText) => {
     }
 
     const formattedAction = `${activeName.toUpperCase()}: ${actionText}`;
-    const hostname = window.location.hostname;
-    await fetch(`http://${hostname}:5000/api/logs`, {
+    await fetch(`${BACKEND_URL}/api/logs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: formattedAction })
@@ -54,7 +55,6 @@ export default function Crm({ selectedFY }) {
     try {
       const saved = localStorage.getItem('ERP_CRM_v9');
       let initialCrm = saved ? JSON.parse(saved) : [];
-      // 🟢 Migration fallback check for old records missing updatedAt
       initialCrm = initialCrm.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
 
       const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
@@ -317,7 +317,7 @@ export default function Crm({ selectedFY }) {
       status: 'New',
       staff: '',
       reminderDate: '',
-      updatedAt: currentTimestamp // 🟢 Exact Timestamp
+      updatedAt: currentTimestamp
     };
 
     const updatedCrm = [...crmData, newLead];
@@ -1605,7 +1605,7 @@ export default function Crm({ selectedFY }) {
             
             <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-[#00a67e] text-white rounded-t-2xl shrink-0">
               <h3 className="font-black uppercase text-sm flex items-center gap-2">
-                <svg className="v-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
                 Excel Import Preview ({rawExcelRows.length} Rows Found)
               </h3>
               <button type="button" onClick={() => setPreviewModalOpen(false)} className="text-white hover:text-red-200 font-bold text-2xl leading-none cursor-pointer">&times;</button>

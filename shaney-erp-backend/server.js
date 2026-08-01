@@ -10,7 +10,7 @@ let activeSessions = {}; // { username: timestamp }
 const LOG_FILE = './office_logs.json';
 const DATA_FILE = './master_state.json';
 
-// Request logging middleware
+// Request logging middleware for debugging on Render
 app.use((req, res, next) => {
     console.log(`📥 [${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
@@ -22,6 +22,7 @@ if (fs.existsSync(LOG_FILE)) {
     try {
         officeLogs = JSON.parse(fs.readFileSync(LOG_FILE, 'utf8'));
     } catch (e) {
+        console.error("Error reading log file, initializing empty array:", e);
         officeLogs = [];
     }
 }
@@ -40,6 +41,7 @@ if (fs.existsSync(DATA_FILE)) {
     try {
         masterState = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
     } catch (e) {
+        console.error("Error reading master state file, initializing empty object:", e);
         masterState = {};
     }
 }
@@ -61,7 +63,7 @@ app.get('/', (req, res) => {
     }
 });
 
-// 1. Heartbeat API
+// 1. Heartbeat API for Online/Offline Status
 app.post('/api/heartbeat', (req, res) => {
     try {
         const username = req.body.username || req.body.user;
@@ -160,7 +162,7 @@ app.get('/api/data', (req, res) => {
     }
 });
 
-// 6. Save Data API (Handles /api/data)
+// 6. Save Data API
 app.post('/api/data', (req, res) => {
     try {
         const { key, item } = req.body;
@@ -188,7 +190,7 @@ app.post('/api/data', (req, res) => {
     }
 });
 
-// 7. Universal Sync / History Handler (Catches /api/history, /api/sync, etc.)
+// 7. Universal History & Sync Handlers (Fixes 404 Not Found errors)
 const handleUniversalSave = (req, res) => {
     try {
         const item = req.body.item || req.body;
