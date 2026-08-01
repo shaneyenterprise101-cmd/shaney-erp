@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+:root { 
+    --theme-color: #00a67e; 
+    --doc-font: 'Georgia', serif; 
+    --cust-font: 'Caveat', cursive; 
+    --header-font: 'Arial', sans-serif; 
+}
+
+body { 
+    font-family: 'Inter', sans-serif; 
+    background-color: #f8fafc; 
+    color: #0f172a; 
+    overflow-y: scroll; 
+    overflow-x: hidden; 
+}
+
+.pro-input { width: 100%; font-size: 0.75rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; border: 1px solid #cbd5e1; background-color: #f8fafc; font-weight: 600; outline: none; transition: all 0.2s; color: #334155; }
+.pro-input:focus { border-color: #00a67e; background-color: #fff; box-shadow: 0 0 0 3px rgba(0, 166, 126, 0.1); }
