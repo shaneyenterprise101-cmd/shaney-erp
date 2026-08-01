@@ -1,69 +1,42 @@
 import express from 'express';
 import cors from 'cors';
-import fs from 'fs';
+import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
+import { DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand } from "@aws-sdk/lib-dynamodb";
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-let activeSessions = {}; // { username: timestamp }
-const LOG_FILE = './office_logs.json';
-const DATA_FILE = './master_state.json';
+// Initialize AWS DynamoDB Client
+const ddbClient = new DynamoDBClient({
+    region: process.env.AWS_REGION || "ap-south-1",
+    credentials: {
+        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
+    }
+});
+const dynamo = DynamoDBDocumentClient.from(ddbClient);
+const TABLE_NAME = "ShaneyERP_MasterState";
 
-// Request logging middleware for debugging on Render
+let activeSessions = {}; // { username: timestamp }
+let officeLogs = [];
+
+// Request logging middleware
 app.use((req, res, next) => {
     console.log(`📥 [${new Date().toISOString()}] ${req.method} ${req.url}`);
     next();
 });
 
-// Load existing logs from file on startup
-let officeLogs = [];
-if (fs.existsSync(LOG_FILE)) {
-    try {
-        officeLogs = JSON.parse(fs.readFileSync(LOG_FILE, 'utf8'));
-    } catch (e) {
-        console.error("Error reading log file, initializing empty array:", e);
-        officeLogs = [];
-    }
-}
-
-const saveLogsToFile = () => {
-    try {
-        fs.writeFileSync(LOG_FILE, JSON.stringify(officeLogs, null, 2));
-    } catch (e) {
-        console.error("Error saving logs to file:", e);
-    }
-};
-
-// Load Master State Data from file
-let masterState = {};
-if (fs.existsSync(DATA_FILE)) {
-    try {
-        masterState = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-    } catch (e) {
-        console.error("Error reading master state file, initializing empty object:", e);
-        masterState = {};
-    }
-}
-
-const saveMasterStateToFile = () => {
-    try {
-        fs.writeFileSync(DATA_FILE, JSON.stringify(masterState, null, 2));
-    } catch (e) {
-        console.error("Error saving master state to file:", e);
-    }
-};
-
 // 0. Root Route
 app.get('/', (req, res) => {
     try {
-        res.send('🚀 Shaney ERP Backend is Live and Running!');
+        res.send('🚀 Shaney ERP Backend with AWS DynamoDB is Live!');
     } catch (err) {
         res.status(500).send('Server Error');
     }
 });
 
-// 1. Heartbeat API for Online/Offline Status
+// 1. Heartbeat API
 app.post('/api/heartbeat', (req, res) => {
     try {
         const username = req.body.username || req.body.user;
@@ -95,17 +68,7 @@ app.get('/api/sessions', (req, res) => {
 // 3. Get Live Office Feed Logs
 app.get('/api/logs', (req, res) => {
     try {
-        const { staff, date } = req.query;
-        let filtered = officeLogs;
-        
-        if (staff && staff !== 'ALL') {
-            filtered = filtered.filter(l => l.staff && l.staff.toUpperCase() === staff.toUpperCase());
-        }
-        if (date) {
-            filtered = filtered.filter(l => l.date === date);
-        }
-        
-        res.json(filtered);
+        res.json(officeLogs);
     } catch (err) {
         res.status(500).json({ success: false, error: err.message });
     }
@@ -117,29 +80,15 @@ app.post('/api/logs', (req, res) => {
         const { action, staff } = req.body;
         if (action) {
             const now = new Date();
-            const dateStr = now.toLocaleDateString('en-GB'); 
-            const timeStr = now.toLocaleTimeString();
-
-            let staffName = staff || 'ADMIN';
-            let cleanAction = action;
-
-            if (action.includes(':')) {
-                const parts = action.split(':');
-                staffName = parts[0].trim();
-                cleanAction = parts.slice(1).join(':').trim();
-            }
-
             const newLog = {
-                id: Date.now(),
-                staff: staffName.toUpperCase(),
-                action: cleanAction,
-                date: dateStr,
-                time: timeStr
+                id: Date.now().toString(),
+                staff: (staff || 'ADMIN').toUpperCase(),
+                action,
+                date: now.toLocaleDateString('en-GB'),
+                time: now.toLocaleTimeString()
             };
-
             officeLogs.unshift(newLog);
-            if (officeLogs.length > 10000) officeLogs.pop(); 
-            saveLogsToFile();
+            if (officeLogs.length > 1000) officeLogs.pop();
         }
         res.json({ success: true, logs: officeLogs });
     } catch (err) {
@@ -147,56 +96,69 @@ app.post('/api/logs', (req, res) => {
     }
 });
 
-// 5. Get Master State Data API (Flexible: supports ?key=... or returns full state)
-app.get('/api/data', (req, res) => {
+// 5. Get Data from DynamoDB
+app.get('/api/data', async (req, res) => {
     try {
         const { key } = req.query;
         if (!key) {
-            // Return full masterState object or flatten into array if requested without key
+            // Scan all items from DynamoDB table
+            const scanResult = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
+            let masterState = {};
+            scanResult.Items.forEach(item => {
+                masterState[item.id] = item.data;
+            });
             return res.json(masterState);
         }
-        const data = masterState[key] || [];
-        res.json({ success: true, data });
+
+        const getResult = await dynamo.send(new GetCommand({
+            TableName: TABLE_NAME,
+            Key: { id: key }
+        }));
+
+        res.json({ success: true, data: getResult.Item ? getResult.Item.data : [] });
     } catch (err) {
         console.error("GET /api/data error:", err);
         res.status(500).json({ success: false, error: err.message });
     }
 });
 
-// 6. Save Data API (Flexible: supports both {key, item} and {type, id, data})
-app.post('/api/data', (req, res) => {
+// 6. Save Data to DynamoDB
+app.post('/api/data', async (req, res) => {
     try {
         const key = req.body.key || req.body.type || 'general';
-        let item = req.body.item || req.body.data;
-        
-        if (!item) {
-            item = req.body; // Fallback to entire body if data/item is missing
-        }
+        let item = req.body.item || req.body.data || req.body;
 
-        // Ensure item has an ID if provided separately
-        if (req.body.id && item && typeof item === 'object' && !item.id) {
-            item.id = req.body.id;
-        }
+        // Fetch existing list from DynamoDB first
+        const existing = await dynamo.send(new GetCommand({
+            TableName: TABLE_NAME,
+            Key: { id: key }
+        }));
 
-        if (!masterState[key]) {
-            masterState[key] = [];
-        }
+        let list = existing.Item && Array.isArray(existing.Item.data) ? existing.Item.data : [];
 
-        if (Array.isArray(masterState[key]) && item && item.id) {
-            let list = masterState[key];
+        if (item && item.id) {
             const index = list.findIndex(i => String(i.id) === String(item.id));
             if (index !== -1) {
                 list[index] = item;
             } else {
                 list.push(item);
             }
-        } else if (Array.isArray(masterState[key])) {
-            masterState[key].push(item);
+        } else if (Array.isArray(item)) {
+            list = item;
         } else {
-            masterState[key] = item;
+            list.push(item);
         }
 
-        saveMasterStateToFile();
+        // Save back to DynamoDB
+        await dynamo.send(new PutCommand({
+            TableName: TABLE_NAME,
+            Item: {
+                id: key,
+                data: list,
+                updatedAt: new Date().toISOString()
+            }
+        }));
+
         res.json({ success: true });
     } catch (err) {
         console.error("POST /api/data error:", err);
@@ -204,88 +166,7 @@ app.post('/api/data', (req, res) => {
     }
 });
 
-// 7. Universal History & Sync Handlers
-const handleUniversalSave = (req, res) => {
-    try {
-        const item = req.body.item || req.body.data || req.body;
-        const key = req.body.key || req.body.type || 'ERP_History_v104';
-        
-        if (!masterState[key]) {
-            masterState[key] = [];
-        }
-        
-        if (item && item.id) {
-            let list = masterState[key];
-            const index = list.findIndex(i => String(i.id) === String(item.id));
-            if (index !== -1) {
-                list[index] = item;
-            } else {
-                list.push(item);
-            }
-            saveMasterStateToFile();
-        }
-        res.json({ success: true });
-    } catch (err) {
-        console.error("Universal Save error:", err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-};
-
-app.post('/api/history', handleUniversalSave);
-app.post('/api/sync', handleUniversalSave);
-
-// 8. Delete Data API
-app.post('/api/data/delete', (req, res) => {
-    try {
-        const { key, itemId } = req.body;
-        if (!key || !itemId) {
-            return res.status(400).json({ success: false, error: 'Key and itemId required' });
-        }
-
-        if (masterState[key]) {
-            masterState[key] = masterState[key].filter(i => String(i.id) !== String(itemId));
-            saveMasterStateToFile();
-        }
-
-        res.json({ success: true });
-    } catch (err) {
-        console.error("POST /api/data/delete error:", err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
-// 9. Public Document Preview API
-app.get('/api/document/:id', (req, res) => {
-    try {
-        const docId = req.params.id;
-        let foundDoc = null;
-
-        for (const [key, list] of Object.entries(masterState)) {
-            if (Array.isArray(list)) {
-                const match = list.find(item => item && String(item.id) === String(docId));
-                if (match) {
-                    const isQuote = key.includes('quotation') || match.type === 'quotation';
-                    foundDoc = {
-                        type: isQuote ? 'quotation' : 'certificate',
-                        data: match
-                    };
-                    break;
-                }
-            }
-        }
-
-        if (foundDoc) {
-            res.json(foundDoc);
-        } else {
-            res.status(404).json({ success: false, error: 'Document not found' });
-        }
-    } catch (err) {
-        console.error("GET /api/document/:id error:", err);
-        res.status(500).json({ success: false, error: err.message });
-    }
-});
-
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🖥️ Shaney ERP Backend Server running on port ${PORT}`);
+    console.log(`🖥️ Shaney ERP Backend connected to AWS DynamoDB on port ${PORT}`);
 });
