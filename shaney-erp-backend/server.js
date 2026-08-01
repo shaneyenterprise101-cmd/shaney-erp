@@ -190,7 +190,7 @@ app.post('/api/data', (req, res) => {
     }
 });
 
-// 7. Universal History & Sync Handlers (Fixes 404 Not Found errors)
+// 7. Universal History & Sync Handlers (Prevents 404 errors)
 const handleUniversalSave = (req, res) => {
     try {
         const item = req.body.item || req.body;

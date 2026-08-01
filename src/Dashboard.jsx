@@ -3,7 +3,9 @@ import Highcharts from 'highcharts';
 import highchartsMap from 'highcharts/modules/map';
 import gujaratGeoJson from '../gujarat.json';
 import { db } from './firebase';
-import { collection, getDocs, doc, setDoc, query, orderBy, limit } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc } from 'firebase/firestore';
+
+const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
 if (typeof highchartsMap === 'function') {
   highchartsMap(Highcharts);
@@ -61,7 +63,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
     }
   });
 
-  // 🟢 HEARTBEAT & SESSION PRESENCE TRACKER VIA FIREBASE FIRESTORE (Vercel Ready)
+  // 🟢 HEARTBEAT & SESSION PRESENCE TRACKER
   useEffect(() => {
     if (!loggedInName) return;
 
@@ -84,7 +86,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
     };
 
     sendCloudHeartbeat();
-    const interval = setInterval(sendCloudHeartbeat, 20000); // Optimized interval to save writes
+    const interval = setInterval(sendCloudHeartbeat, 20000);
     return () => clearInterval(interval);
   }, [loggedInName]);
 
@@ -127,7 +129,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         let crmData = JSON.parse(localStorage.getItem("ERP_CRM_v9") || "[]");
         const customersData = JSON.parse(localStorage.getItem("ERP_Customers_v104") || "[]");
         
-        // 🟢 Pull records from SQLite local database if available via Electron IPC
         if (window.require) {
           try {
             const { ipcRenderer } = window.require('electron');
@@ -147,7 +148,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         let onlineMap = {};
         let logsFromCloud = [];
         try {
-          // Fetch active sessions from Firestore
           const sessionsSnapshot = await getDocs(collection(db, "active_sessions"));
           const nowTime = Date.now();
           sessionsSnapshot.forEach((docSnap) => {
@@ -157,12 +157,14 @@ export default function Dashboard({ currentUser, setActiveTab }) {
             }
           });
 
-          // Fetch recent office logs from Firestore (Limited to 30 to save reads)
-          const qLogs = query(collection(db, "office_logs"), orderBy("id", "desc"), limit(30));
-          const logsSnapshot = await getDocs(qLogs);
-          logsSnapshot.forEach((docSnap) => {
-            logsFromCloud.push(docSnap.data());
-          });
+          // 🟢 FETCH LIVE OFFICE FEED LOGS FROM RENDER BACKEND
+          const logRes = await fetch(`${BACKEND_URL}/api/logs`);
+          if (logRes.ok) {
+            const serverLogs = await logRes.json();
+            if (Array.isArray(serverLogs)) {
+              logsFromCloud = serverLogs.slice(0, 30);
+            }
+          }
         } catch (e) {
           const activeSessions = JSON.parse(localStorage.getItem("ERP_Active_Sessions_Map") || "{}");
           const now = Date.now();
@@ -196,7 +198,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         let tasks = [];
         let districtMap = {};
 
-        // 🏆 AUTOMATIC LEADERBOARD CALCULATION BASED ON "CONFIRMED BY" (staffName)
         const curMonth = today.getMonth();
         const curYear = today.getFullYear();
         let staffSalesMap = {};
@@ -249,7 +250,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
           let tVal = parseFloat(String(b.total || "0").replace(/,/g, '').replace('₹', '')) || 0;
           rev += tVal;
 
-          // Leaderboard strictly using 'staffName' (Confirmed By)
           if (b.date) {
             let dObj = parseIndianDate(b.date);
             if (dObj && !isNaN(dObj) && dObj.getMonth() === curMonth && dObj.getFullYear() === curYear) {
@@ -347,7 +347,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
     };
 
     fetchDataAndSessions();
-    const pollInterval = setInterval(fetchDataAndSessions, 10000); // 10s poll interval to save reads
+    const pollInterval = setInterval(fetchDataAndSessions, 10000);
     return () => clearInterval(pollInterval);
   }, [currentUser, role, loggedInName]);
 
@@ -513,7 +513,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
 
   return (
     <div className="animate-[fadeIn_0.3s_ease-in-out]">
-      {/* 👋 WELCOME BANNER */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
           <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
@@ -538,7 +537,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         </div>
       </div>
 
-      {/* 📈 TOP METRICS */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl p-5 text-white shadow-sm relative overflow-hidden">
           <div className="absolute -right-2 -top-2 text-white/20 text-6xl select-none">
@@ -570,7 +568,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         </div>
       </div>
 
-      {/* 🚀 3-COLUMN DASHBOARD GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <div className="space-y-6">
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -695,7 +692,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
             </div>
           </div>
 
-          {/* 🏆 THIS MONTH'S CONFIRMED BY LEADERBOARD BOX */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
             <div className="border-b border-slate-100 pb-3 mb-4 flex items-center gap-2">
               <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
@@ -762,7 +758,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
             <div style={{ width: '100%', height: '380px' }} id="gujaratMapContainer"></div>
           </div>
 
-          {/* ⏱️ REAL LOGIN ACTIVITY HEATMAP GRID */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
               <div>
@@ -773,7 +768,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
                 <p className="text-[10px] text-slate-400 font-bold mt-0.5">Date-wise and exact hour-wise activity matrix (Click green box for timestamps)</p>
               </div>
 
-              {/* 🟢 INDEPENDENT STAFF SELECT DROPDOWN FOR LOGIN ACTIVITY ONLY */}
               <div className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 flex items-center gap-2">
                 <div className="relative flex items-center">
                   <select 
@@ -800,8 +794,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
 
             <div className="overflow-x-auto custom-scrollbar pb-2">
               <div className="min-w-[700px]">
-                
-                {/* Header Dynamic Dates Row (1 to 31) */}
                 <div className="flex mb-2 pl-16">
                   {(() => {
                     const now = new Date();
@@ -821,7 +813,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
                   })()}
                 </div>
 
-                {/* Rows for Hours (00 to 23 / 12 AM to 11 PM) */}
                 <div className="space-y-1.5">
                   {['12 AM', '01 AM', '02 AM', '03 AM', '04 AM', '05 AM', '06 AM', '07 AM', '08 AM', '09 AM', '10 AM', '11 AM', '12 PM', '01 PM', '02 PM', '03 PM', '04 PM', '05 PM', '06 PM', '07 PM', '08 PM', '09 PM', '10 PM', '11 PM'].map((hourLabel, hIdx) => (
                     <div key={hIdx} className="flex items-center">
@@ -888,7 +879,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         </div>
       </div>
 
-      {/* 🟢 TIMESTAMP POPUP MODAL WHEN CLICKING GREEN BOX */}
       {selectedActivityInfo && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-in-out]">
           <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden border border-slate-200">
@@ -939,7 +929,6 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         </div>
       )}
 
-      {/* 🟢 TALUKA BREAKDOWN MODAL POPUP ON DISTRICT CLICK */}
       {modalDistrict && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-in-out]">
           <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200">
