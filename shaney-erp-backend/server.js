@@ -36,6 +36,58 @@ app.get('/', (req, res) => {
     }
 });
 
+// 🟢 NEW: Backend Login Authentication Route
+app.post('/api/login', async (req, res) => {
+    try {
+        const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({ success: false, error: "Email/User ID and Password are required" });
+        }
+
+        const cleanEmail = email.trim().toLowerCase();
+
+        // 1. Check Master Admin Credentials
+        if ((cleanEmail === 'shaneyenterprise101@gmail.com' || cleanEmail === 'admin') && (password === 'Shaney@123' || password === 'admin123')) {
+            return res.json({
+                success: true,
+                user: {
+                    userid: cleanEmail,
+                    name: 'Shaney Enterprise',
+                    role: 'ADMIN',
+                    permissions: { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true }
+                }
+            });
+        }
+
+        // 2. Check Staff Accounts from DynamoDB
+        const staffGet = await dynamo.send(new GetCommand({
+            TableName: TABLE_NAME,
+            Key: { id: 'staff_accounts' }
+        }));
+
+        let staffList = staffGet.Item && Array.isArray(staffGet.Item.data) ? staffGet.Item.data : [];
+        const foundStaff = staffList.find(s => String(s.userid).toLowerCase() === cleanEmail || String(s.name).toLowerCase() === cleanEmail);
+
+        if (foundStaff && String(foundStaff.password) === String(password)) {
+            return res.json({
+                success: true,
+                user: {
+                    userid: foundStaff.userid,
+                    name: foundStaff.name,
+                    role: 'STAFF',
+                    phone: foundStaff.phone || '',
+                    permissions: foundStaff.permissions || { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true }
+                }
+            });
+        }
+
+        res.status(401).json({ success: false, error: "Invalid Admin Email or Staff User ID / Password!" });
+    } catch (err) {
+        console.error("POST /api/login error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 // 1. Heartbeat API
 app.post('/api/heartbeat', (req, res) => {
     try {
@@ -101,7 +153,6 @@ app.get('/api/data', async (req, res) => {
     try {
         const { key } = req.query;
         if (!key) {
-            // Scan all items from DynamoDB table
             const scanResult = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
             let masterState = {};
             scanResult.Items.forEach(item => {
@@ -128,7 +179,6 @@ app.post('/api/data', async (req, res) => {
         const key = req.body.key || req.body.type || 'general';
         let item = req.body.item || req.body.data || req.body;
 
-        // Fetch existing list from DynamoDB first
         const existing = await dynamo.send(new GetCommand({
             TableName: TABLE_NAME,
             Key: { id: key }
@@ -149,7 +199,6 @@ app.post('/api/data', async (req, res) => {
             list.push(item);
         }
 
-        // Save back to DynamoDB
         await dynamo.send(new PutCommand({
             TableName: TABLE_NAME,
             Item: {
