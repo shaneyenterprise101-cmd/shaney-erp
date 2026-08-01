@@ -139,7 +139,7 @@ export const SyncManager = {
     return this.getLocalData("ERP_Office_Live_Logs", []);
   },
 
-  // 🟢 7. HEARTBEAT / ONLINE PRESENCE
+  // 🟢 7. HEARTBEAT / ONLINE PRESENCE (Throttled & Safe)
   async updateHeartbeat(username) {
     if (!username) return;
     try {
@@ -157,7 +157,7 @@ export const SyncManager = {
         body: JSON.stringify({ type: 'active_sessions', id: String(userKey), data: payload })
       });
     } catch (e) {
-      console.error("Heartbeat error:", e);
+      // Fail silently to prevent console or file cluttering
     }
   },
 

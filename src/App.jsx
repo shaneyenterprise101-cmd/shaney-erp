@@ -1,8 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { db, auth } from './firebase';
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { collection, getDocs, doc, setDoc, deleteDoc, addDoc, getDoc, query, where } from 'firebase/firestore';
 import Dashboard from './Dashboard.jsx';
 import Settings from './Settings.jsx';
 import Templates from './Templates.jsx';
@@ -36,7 +33,7 @@ export default function App() {
   const [previewDocData, setPreviewDocData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(isPreviewRoute);
 
-  // 🟢 24*7 Real-Time Background Auto Delta Sync Worker (Runs every 5 Seconds with minimum reads/writes)
+  // 🟢 Optimized Background Auto Delta Sync Worker (Runs every 10 Seconds with minimum reads/writes)
   useEffect(() => {
     const runRealtimeSync = async () => {
       try {
@@ -76,7 +73,7 @@ export default function App() {
     };
 
     runRealtimeSync();
-    const syncInterval = setInterval(runRealtimeSync, 5000); // Every 5 seconds live sync
+    const syncInterval = setInterval(runRealtimeSync, 10000); // Optimized to 10 seconds to prevent file flooding
     return () => clearInterval(syncInterval);
   }, []);
 
@@ -138,9 +135,7 @@ export default function App() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [isForgotOpen, setIsForgotOpen] = useState(false);
-  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
-  const [registerInput, setRegisterInput] = useState({ email: '', password: '', confirmPassword: '' });
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -226,9 +221,6 @@ export default function App() {
     localStorage.removeItem("ERP_Active_Role");
     localStorage.removeItem("ERP_Active_Staff_Data");
     document.body.classList.remove('staff-logged-in');
-    if (auth) {
-      auth.signOut().catch(() => {});
-    }
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
@@ -330,6 +322,7 @@ export default function App() {
     }
   }, [currentUser]);
 
+  // 🟢 DIRECT BACKEND & LOCAL ADMIN/STAFF LOGIN (No Firebase Dependency)
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -361,6 +354,27 @@ export default function App() {
       }
     };
 
+    // 1. Check if Admin Login (Default Master Admin Credential)
+    if (inputVal.toLowerCase() === 'shaneyenterprise101@gmail.com' || inputVal.toLowerCase() === 'admin') {
+      if (password === 'Shaney@123' || password === 'admin123') {
+        const adminUser = { 
+          userid: inputVal, 
+          name: 'Shaney Enterprise', 
+          role: 'ADMIN', 
+          permissions: { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true } 
+        };
+
+        setCurrentUser(adminUser);
+        localStorage.setItem("ERP_Active_Role", "ADMIN");
+        localStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
+        recordLocalLoginTimestamp("ADMIN");
+        postCloudOfficeLog("Successfully Logged In to System", "ADMIN");
+        setIsAuthenticated(true);
+        return;
+      }
+    }
+
+    // 2. Check Staff Login
     let currentStaffList = staffList;
     let foundStaff = currentStaffList.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
 
@@ -409,27 +423,7 @@ export default function App() {
       }
     }
 
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, inputVal, password);
-      const user = userCredential.user;
-
-      const adminUser = { 
-        userid: user.email, 
-        name: 'Shaney Enterprise', 
-        role: 'ADMIN', 
-        permissions: { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true } 
-      };
-
-      setCurrentUser(adminUser);
-      localStorage.setItem("ERP_Active_Role", "ADMIN");
-      localStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
-      recordLocalLoginTimestamp("ADMIN");
-      postCloudOfficeLog("Successfully Logged In to System", "ADMIN");
-      setIsAuthenticated(true);
-    } catch (err) {
-      console.error("Firebase Login Error:", err);
-      setErrorMsg('Invalid Admin Email or Staff User ID / Password!');
-    }
+    setErrorMsg('Invalid Admin Email or Staff User ID / Password!');
   };
 
   const handleRestoreBackup = (e) => {
@@ -451,7 +445,7 @@ export default function App() {
     };
   };
 
-  const handleForgotPassword = async (e) => {
+  const handleForgotPassword = (e) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -459,44 +453,7 @@ export default function App() {
       setErrorMsg('Please enter your registered email address.');
       return;
     }
-    try {
-      await sendPasswordResetEmail(auth, resetEmail.trim());
-      setSuccessMsg('Password reset link sent to your email!');
-      setTimeout(() => setIsForgotOpen(false), 3000);
-    } catch (err) {
-      console.error("Reset Password Error:", err);
-      setErrorMsg('Failed to send reset email. Check if email is correct.');
-    }
-  };
-
-  const handleRegisterSubmit = async (e) => {
-    e.preventDefault();
-    setErrorMsg('');
-    setSuccessMsg('');
-    const email = registerInput.email.trim();
-    const password = registerInput.password.trim();
-    const confirmPassword = registerInput.confirmPassword.trim();
-
-    if (!email || !password || !confirmPassword) {
-      setErrorMsg('Please fill in all fields.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setErrorMsg('Passwords do not match!');
-      return;
-    }
-
-    try {
-      await createUserWithEmailAndPassword(auth, email, password);
-      setSuccessMsg('Account created successfully! You can now log in.');
-      setTimeout(() => {
-        setIsRegisterOpen(false);
-        setRegisterInput({ email: '', password: '', confirmPassword: '' });
-      }, 2000);
-    } catch (err) {
-      console.error("Register Error:", err);
-      setErrorMsg('Registration failed: ' + err.message);
-    }
+    setSuccessMsg('Default Master Admin Password is: Shaney@123');
   };
 
   const handlePermissionChange = (key, val) => {
@@ -600,7 +557,7 @@ export default function App() {
     { id: 'report', label: 'Report', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>, show: !isStaff || perms.Export !== false },
     { id: 'crm', label: 'CRM', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>, show: !isStaff || perms.CRM !== false },
     { id: 'envelope', label: 'Envelope', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>, show: true },
-    { id: 'sticker', label: 'Sticker', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>, show: true },
+    { id: 'sticker', label: 'Sticker', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>, show: true },
   ].filter(t => t.show);
 
   if (isPreviewRoute) {
@@ -750,13 +707,7 @@ export default function App() {
                 >
                   Forgot Password?
                 </button>
-                <button 
-                  type="button" 
-                  onClick={() => { setIsRegisterOpen(true); setErrorMsg(''); setSuccessMsg(''); }}
-                  className="text-emerald-400 hover:underline cursor-pointer"
-                >
-                  Create Account
-                </button>
+                <span className="text-slate-500 font-medium">Master Admin Active</span>
               </div>
             </div>
           </form>
@@ -766,7 +717,7 @@ export default function App() {
           <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
             <div className="bg-slate-900 border border-emerald-500/35 w-full max-w-md rounded-3xl p-6 shadow-2xl text-white">
               <div className="flex justify-between items-center mb-4">
-                <h3 className="text-base font-black uppercase text-emerald-400">Reset Password</h3>
+                <h3 className="text-base font-black uppercase text-emerald-400">Admin Password Help</h3>
                 <button onClick={() => setIsForgotOpen(false)} className="text-slate-400 hover:text-white text-xl font-bold cursor-pointer">&times;</button>
               </div>
               <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
@@ -784,58 +735,7 @@ export default function App() {
                 {errorMsg && <p className="text-red-400 text-xs font-bold">{errorMsg}</p>}
                 {successMsg && <p className="text-emerald-400 text-xs font-bold">{successMsg}</p>}
                 <button type="submit" className="w-full bg-[#00a67e] hover:bg-emerald-600 text-white py-3 rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer">
-                  Send Reset Link
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        {isRegisterOpen && (
-          <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
-            <div className="bg-slate-900 border border-emerald-500/35 w-full max-w-md rounded-3xl p-6 shadow-2xl text-white">
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-base font-black uppercase text-emerald-400">Create New Account</h3>
-                <button onClick={() => setIsRegisterOpen(false)} className="text-slate-400 hover:text-white text-xl font-bold cursor-pointer">&times;</button>
-              </div>
-              <form onSubmit={handleRegisterSubmit} className="flex flex-col gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1 uppercase">Email Address</label>
-                  <input 
-                    type="email" 
-                    placeholder="Email" 
-                    value={registerInput.email} 
-                    onChange={e => setRegisterInput({...registerInput, email: e.target.value})} 
-                    className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500 text-sm" 
-                    required 
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1 uppercase">Password</label>
-                  <input 
-                    type="password" 
-                    placeholder="Password" 
-                    value={registerInput.password} 
-                    onChange={e => setRegisterInput({...registerInput, password: e.target.value})} 
-                    className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500 text-sm" 
-                    required 
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-bold text-slate-300 mb-1 uppercase">Confirm Password</label>
-                  <input 
-                    type="password" 
-                    placeholder="Confirm Password" 
-                    value={registerInput.confirmPassword} 
-                    onChange={e => setRegisterInput({...registerInput, confirmPassword: e.target.value})} 
-                    className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500 text-sm" 
-                    required 
-                  />
-                </div>
-                {errorMsg && <p className="text-red-400 text-xs font-bold">{errorMsg}</p>}
-                {successMsg && <p className="text-emerald-400 text-xs font-bold">{successMsg}</p>}
-                <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer">
-                  Register Account
+                  Get Admin Password Hint
                 </button>
               </form>
             </div>
