@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { SyncManager } from './SyncManager.js';
-import { db, auth } from './firebase'; // Auth kept only for login if needed, or handled via backend
+import { db, auth } from './firebase'; 
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import Dashboard from './Dashboard.jsx';
 import Settings from './Settings.jsx';
@@ -38,7 +38,7 @@ export default function App() {
   // 🟢 24*7 Real-Time Background Auto Sync (Stops immediately if logged out)
   useEffect(() => {
     const runRealtimeSync = async () => {
-      if (!localStorage.getItem("ERP_Active_Role")) return; // Logout protection
+      if (!localStorage.getItem("ERP_Active_Role")) return; 
       try {
         if (!window.require) return;
         const { ipcRenderer } = window.require('electron');
@@ -46,7 +46,6 @@ export default function App() {
 
         const lastSync = Number(localStorage.getItem('ERP_Last_Sync_Timestamp') || 0);
         
-        // Push local changes to Render Backend
         const deltaRecords = await ipcRenderer.invoke('sqlite-get-delta-records', lastSync);
         for (let rec of deltaRecords) {
            await SyncManager.saveData('ERP_History_v104', 'history', rec);
@@ -71,7 +70,7 @@ export default function App() {
       if (activeUser?.name) {
         SyncManager.updateHeartbeat(activeUser.name);
       }
-    }, 30000); // Every 30 seconds
+    }, 30000); 
     return () => clearInterval(heartbeatInterval);
   }, []);
 
@@ -93,7 +92,6 @@ export default function App() {
             return;
           }
 
-          // Fetch from Render Backend if not cached
           const res = await fetch(`${BACKEND_URL}/api/document/${previewDocId}`);
           if (res.ok) {
             const data = await res.json();
@@ -140,7 +138,6 @@ export default function App() {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
   const [selectedFY, setSelectedFY] = useState(getCurrentFY());
@@ -663,9 +660,107 @@ export default function App() {
                 className="w-full bg-[#00a67e] text-white py-3.5 rounded-xl font-black text-sm uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg active:scale-95 mt-2 cursor-pointer">
                 Login System
               </button>
+
+              <div className="flex justify-between items-center text-xs font-bold mt-2">
+                <button 
+                  type="button" 
+                  onClick={() => { setIsForgotOpen(true); setErrorMsg(''); setSuccessMsg(''); }}
+                  className="text-emerald-400 hover:underline cursor-pointer"
+                >
+                  Forgot Password?
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => { setIsRegisterOpen(true); setErrorMsg(''); setSuccessMsg(''); }}
+                  className="text-emerald-400 hover:underline cursor-pointer"
+                >
+                  Create Account
+                </button>
+              </div>
             </div>
           </form>
         </div>
+
+        {isForgotOpen && (
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="bg-slate-900 border border-emerald-500/35 w-full max-w-md rounded-3xl p-6 shadow-2xl text-white">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-base font-black uppercase text-emerald-400">Reset Password</h3>
+                <button onClick={() => setIsForgotOpen(false)} className="text-slate-400 hover:text-white text-xl font-bold cursor-pointer">&times;</button>
+              </div>
+              <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1 uppercase">Enter Your Email</label>
+                  <input 
+                    type="email" 
+                    placeholder="admin@shaney.com" 
+                    value={resetEmail} 
+                    onChange={e => setResetEmail(e.target.value)} 
+                    className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-[#00a67e] text-sm" 
+                    required 
+                  />
+                </div>
+                {errorMsg && <p className="text-red-400 text-xs font-bold">{errorMsg}</p>}
+                {successMsg && <p className="text-emerald-400 text-xs font-bold">{successMsg}</p>}
+                <button type="submit" className="w-full bg-[#00a67e] hover:bg-emerald-600 text-white py-3 rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer">
+                  Send Reset Link
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {isRegisterOpen && (
+          <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+            <div className="bg-slate-900 border border-emerald-500/35 w-full max-w-md rounded-3xl p-6 shadow-2xl text-white">
+              <div className="flex justify-between items-center mb-4">
+                <h3 className="text-base font-black uppercase text-emerald-400">Create New Account</h3>
+                <button onClick={() => setIsRegisterOpen(false)} className="text-slate-400 hover:text-white text-xl font-bold cursor-pointer">&times;</button>
+              </div>
+              <form onSubmit={handleRegisterSubmit} className="flex flex-col gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1 uppercase">Email Address</label>
+                  <input 
+                    type="email" 
+                    placeholder="Email" 
+                    value={registerInput.email} 
+                    onChange={e => setRegisterInput({...registerInput, email: e.target.value})} 
+                    className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500 text-sm" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1 uppercase">Password</label>
+                  <input 
+                    type="password" 
+                    placeholder="Password" 
+                    value={registerInput.password} 
+                    onChange={e => setRegisterInput({...registerInput, password: e.target.value})} 
+                    className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500 text-sm" 
+                    required 
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-300 mb-1 uppercase">Confirm Password</label>
+                  <input 
+                    type="password" 
+                    placeholder="Confirm Password" 
+                    value={registerInput.confirmPassword} 
+                    onChange={e => setRegisterInput({...registerInput, confirmPassword: e.target.value})} 
+                    className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-emerald-500 text-sm" 
+                    required 
+                  />
+                </div>
+                {errorMsg && <p className="text-red-400 text-xs font-bold">{errorMsg}</p>}
+                {successMsg && <p className="text-emerald-400 text-xs font-bold">{successMsg}</p>}
+                <button type="submit" className="w-full bg-emerald-600 hover:bg-emerald-500 text-white py-3 rounded-xl font-black text-xs uppercase tracking-wider cursor-pointer">
+                  Register Account
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
       </div>
     );
   }
@@ -701,14 +796,174 @@ export default function App() {
             ))}
           </select>
 
-          <button 
-            onClick={() => handleLogout()}
-            className="bg-red-600 hover:bg-red-700 text-white font-black text-xs px-3.5 py-2 rounded-xl shadow-sm transition-colors uppercase cursor-pointer"
+          <div className="relative hidden md:block">
+            <button 
+              onClick={() => { setIsCreateOpen(!isCreateOpen); setIsProfileOpen(false); }}
+              className="bg-emerald-700 hover:bg-emerald-600 text-white font-black text-xs px-3.5 py-2 rounded-xl flex items-center gap-1.5 shadow-sm border border-emerald-500/50 transition-colors uppercase cursor-pointer"
+            >
+              <span>+ Create</span>
+              <span className="text-[10px]">▼</span>
+            </button>
+
+            {isCreateOpen && (
+              <div className="absolute right-0 top-full mt-2 w-52 bg-white rounded-2xl shadow-xl border border-slate-200 z-[99999] overflow-hidden text-slate-800 py-1.5">
+                <button onClick={() => { setActiveTab('certificate'); setCertInitialMode('create'); setIsCreateOpen(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-emerald-50 hover:text-[#00a67e] transition-colors flex items-center gap-2.5 border-b border-slate-50 cursor-pointer">
+                  <span>New Certificate</span>
+                </button>
+                <button onClick={() => { setActiveTab('quotation'); setQuoteInitialMode('create'); setIsCreateOpen(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-emerald-50 hover:text-[#00a67e] transition-colors flex items-center gap-2.5 border-b border-slate-50 cursor-pointer">
+                  <span>New Quotation</span>
+                </button>
+                <button onClick={() => { setActiveTab('product'); setIsCreateOpen(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-emerald-50 hover:text-[#00a67e] transition-colors flex items-center gap-2.5 border-b border-slate-50 cursor-pointer">
+                  <span>New Product</span>
+                </button>
+                <button onClick={() => { setActiveTab('customer'); setIsCreateOpen(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-emerald-50 hover:text-[#00a67e] transition-colors flex items-center gap-2.5 border-b border-slate-50 cursor-pointer">
+                  <span>New Customer</span>
+                </button>
+                <button onClick={() => { setActiveTab('crm'); setIsCreateOpen(false); }} className="w-full text-left px-4 py-2.5 text-xs font-bold hover:bg-emerald-50 hover:text-indigo-600 transition-colors flex items-center gap-2.5 text-indigo-700 bg-indigo-50/50 cursor-pointer">
+                  <span>+ New Lead (CRM)</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div 
+            className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-white border-2 border-emerald-300 flex items-center justify-center cursor-pointer shadow-md overflow-hidden hover:scale-105 transition-transform shrink-0"
+            onClick={() => { setIsProfileOpen(!isProfileOpen); setIsCreateOpen(false); }}
           >
-            Log Out
+            <img src={logoImage} alt="Profile Logo" className="w-full h-full object-cover rounded-full" onError={(e)=>{e.target.src="/Shaney Logo.jpg"}} />
+          </div>
+
+          <button 
+            onClick={() => setIsMobileDrawerOpen(true)}
+            className="md:hidden bg-emerald-700 hover:bg-emerald-600 text-white p-2 rounded-xl flex items-center justify-center shadow-sm border border-emerald-500/50 cursor-pointer shrink-0"
+            title="Open Menu"
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16m-7 6h7" />
+            </svg>
           </button>
+
+          {isProfileOpen && (
+            <div className="absolute right-0 top-full mt-3 w-[320px] bg-white rounded-3xl shadow-[0_15px_50px_rgba(0,0,0,0.15)] border border-slate-200 z-[99999] overflow-hidden text-slate-800">
+              <div className="flex items-start justify-between p-5 bg-white border-b border-slate-100">
+                <div className="flex items-center space-x-3.5">
+                  <div className="w-12 h-12 rounded-full bg-white border border-slate-200 flex items-center justify-center overflow-hidden shadow-inner shrink-0">
+                    <img src={logoImage} alt="Menu Logo" className="w-full h-full object-cover rounded-full" onError={(e)=>{e.target.src="/Shaney Logo.jpg"}} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-black text-slate-800 leading-tight uppercase">{currentUser?.name || 'Shaney Enterprise'}</h4>
+                    <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">{currentUser?.role || 'ADMIN'}</span>
+                  </div>
+                </div>
+                <button onClick={() => setIsProfileOpen(false)} className="text-slate-400 hover:text-red-500 text-xl font-bold cursor-pointer p-1">&times;</button>
+              </div>
+
+              {!isStaff && (
+                <div className="grid grid-cols-2 gap-3.5 p-4 bg-white w-full">
+                  <button 
+                    onClick={() => openSettings('settings-general')}
+                    className="flex flex-col items-center justify-center space-y-2 border border-slate-200/80 rounded-2xl p-4 hover:border-[#00a67e] hover:bg-emerald-50/50 transition-all text-slate-700 shadow-sm bg-white cursor-pointer group">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-700">Setting</span>
+                  </button>
+                  <button 
+                    onClick={() => openSettings('settings-template')}
+                    className="flex flex-col items-center justify-center space-y-2 border border-slate-200/80 rounded-2xl p-4 hover:border-amber-400 hover:bg-amber-50/50 transition-all text-slate-700 shadow-sm bg-white cursor-pointer group">
+                    <span className="text-[11px] font-black uppercase tracking-wider text-slate-700">Templates</span>
+                  </button>
+                </div>
+              )}
+
+              <div className="bg-white w-full border-t border-slate-100">
+                {!isStaff && (
+                  <>
+                    <button 
+                      onClick={() => { setIsStaffModalOpen(true); setIsProfileOpen(false); }}
+                      className="w-full py-4 px-5 text-indigo-600 hover:bg-indigo-50 transition-colors text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2.5 cursor-pointer border-b border-slate-100"
+                    >
+                      MANAGE STAFF ACCOUNTS
+                    </button>
+                    <button 
+                      onClick={handleFactoryReset}
+                      className="w-full py-4 px-5 text-amber-600 hover:bg-amber-50 transition-colors text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2.5 cursor-pointer border-b border-slate-100"
+                    >
+                      FACTORY RESET
+                    </button>
+                  </>
+                )}
+
+                {isStaff && (
+                  <label className="w-full py-4 px-5 text-emerald-600 hover:bg-emerald-50 transition-colors text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2.5 cursor-pointer border-b border-slate-100">
+                    RESTORE DATA (.JSON)
+                    <input type="file" accept=".json" onChange={handleRestoreBackup} className="hidden" />
+                  </label>
+                )}
+
+                <button 
+                  onClick={handleLogout}
+                  className="w-full py-4 px-5 text-red-600 hover:bg-red-50 transition-colors text-[11px] font-black uppercase tracking-wider flex items-center justify-center gap-2.5 cursor-pointer"
+                >
+                  LOG OUT
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </header>
+
+      <nav className="hidden md:flex overflow-x-auto bg-white border-b border-slate-200 shadow-sm sticky top-[60px] z-40 scrollbar-hide">
+        {tabsConfig.map(tab => (
+          <div 
+            key={tab.id}
+            onClick={() => { setActiveTab(tab.id); setIsProfileOpen(false); setIsCreateOpen(false); }}
+            className={`flex-1 min-w-[100px] text-center py-3 cursor-pointer font-bold text-[11px] uppercase transition-all border-b-4 flex items-center justify-center gap-1.5 ${activeTab === tab.id ? 'text-[#00a67e] border-[#00a67e] bg-[#f0fdf4]' : 'text-slate-500 border-transparent hover:bg-slate-50'}`}>
+            <span>{tab.icon}</span>
+            <span>{tab.label}</span>
+          </div>
+        ))}
+      </nav>
+
+      {isMobileDrawerOpen && (
+        <div className="fixed inset-0 z-[99999] flex md:hidden">
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setIsMobileDrawerOpen(false)}></div>
+          <div className="relative w-80 max-w-[85%] bg-white h-full shadow-2xl flex flex-col z-10 overflow-y-auto">
+            <div className="bg-[#00a67e] text-white p-5 flex items-center justify-between shrink-0">
+              <div className="flex items-center space-x-3">
+                <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center overflow-hidden border border-emerald-300">
+                  <img src={logoImage} alt="Logo" className="w-full h-full object-cover rounded-full" onError={(e)=>{e.target.src="/Shaney Logo.jpg"}} />
+                </div>
+                <div>
+                  <h4 className="font-black text-sm leading-tight uppercase">{currentUser?.name || 'Shaney Enterprise'}</h4>
+                  <span className="text-[10px] font-extrabold text-emerald-200 uppercase tracking-widest">{currentUser?.role || 'ADMIN'}</span>
+                </div>
+              </div>
+              <button onClick={() => setIsMobileDrawerOpen(false)} className="text-white hover:text-red-200 text-2xl font-black cursor-pointer p-1">&times;</button>
+            </div>
+
+            <div className="flex-1 p-4 flex flex-col gap-1.5">
+              <div className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-3 py-1 mb-1">Main Menu</div>
+              {tabsConfig.map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => { setActiveTab(tab.id); setIsMobileDrawerOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition-all cursor-pointer ${activeTab === tab.id ? 'bg-emerald-50 text-[#00a67e] border border-emerald-200 shadow-sm' : 'text-slate-700 hover:bg-slate-50'}`}
+                >
+                  <span className="text-base">{tab.icon}</span>
+                  <span>{tab.label}</span>
+                </button>
+              ))}
+            </div>
+
+            <div className="p-4 border-t border-slate-200 bg-white shrink-0">
+              <button 
+                onClick={() => { setIsMobileDrawerOpen(false); handleLogout(); }}
+                className="w-full bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 py-3.5 rounded-2xl font-black text-xs uppercase tracking-widest shadow-sm transition-colors cursor-pointer flex items-center justify-center gap-2"
+              >
+                LOG OUT SYSTEM
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <main className="p-4 md:p-6 w-full max-w-7xl mx-auto">
         {activeTab === 'dashboard' && <Dashboard currentUser={currentUser} setActiveTab={setActiveTab} />}
@@ -725,6 +980,52 @@ export default function App() {
         {activeTab === 'envelope' && <Envelope />}
         {activeTab === 'sticker' && <Sticker />}
       </main>
+
+      {isStaffModalOpen && !isStaff && (
+        <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+          <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="flex items-center justify-between px-6 py-4 bg-indigo-600 text-white">
+              <h3 className="text-sm font-black uppercase tracking-wider">Staff Accounts Management</h3>
+              <button onClick={() => setIsStaffModalOpen(false)} className="text-indigo-200 hover:text-white text-2xl font-bold px-2 cursor-pointer">&times;</button>
+            </div>
+            <div className="p-6 overflow-y-auto bg-slate-50 grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4">
+                <h4 className="text-xs font-black text-slate-800 uppercase">Create New Staff</h4>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">User ID *</label>
+                  <input type="text" value={newStaffForm.userid} onChange={e=>setNewStaffForm({...newStaffForm, userid: e.target.value})} className="pro-input text-xs py-2 bg-slate-50 font-bold" required />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Full Name *</label>
+                  <input type="text" value={newStaffForm.name} onChange={e=>setNewStaffForm({...newStaffForm, name: e.target.value})} className="pro-input text-xs py-2 bg-slate-50 font-bold" required />
+                </div>
+                <div>
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Password *</label>
+                  <input type="text" value={newStaffForm.password} onChange={e=>setNewStaffForm({...newStaffForm, password: e.target.value})} className="pro-input text-xs py-2 bg-slate-50 font-bold" required />
+                </div>
+                <button onClick={handleSaveStaff} className="w-full bg-[#00a67e] text-white py-3 rounded-xl font-black text-xs uppercase cursor-pointer">Save Staff</button>
+              </div>
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+                <h4 className="text-xs font-black text-slate-800 uppercase mb-4">Active Staff List</h4>
+                <div className="flex flex-col gap-2.5 overflow-y-auto max-h-[350px]">
+                  {staffList.filter(st => st.userid !== 'admin').map((st) => (
+                    <div key={st.userid} className="flex justify-between items-center p-3 rounded-xl border bg-slate-50 border-slate-100">
+                      <div>
+                        <h5 className="text-xs font-black text-slate-800 uppercase">{st.name}</h5>
+                        <span className="text-[10px] font-bold text-indigo-600">ID: {st.userid}</span>
+                      </div>
+                      <button onClick={() => handleDeleteStaff(st.userid)} className="text-red-500 text-xs font-bold cursor-pointer">Delete</button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="p-4 bg-white border-t border-slate-200 flex justify-end">
+              <button onClick={() => setIsStaffModalOpen(false)} className="bg-slate-800 text-white px-6 py-2.5 rounded-xl text-xs font-black uppercase cursor-pointer">Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
