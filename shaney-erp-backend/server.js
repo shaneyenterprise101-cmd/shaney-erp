@@ -16,7 +16,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// 📂 Load existing logs from file on startup
+// Load existing logs from file on startup
 let officeLogs = [];
 if (fs.existsSync(LOG_FILE)) {
     try {
@@ -35,7 +35,7 @@ const saveLogsToFile = () => {
     }
 };
 
-// 📂 Load Master State Data from file
+// Load Master State Data from file
 let masterState = {};
 if (fs.existsSync(DATA_FILE)) {
     try {
@@ -248,7 +248,7 @@ app.get('/api/document/:id', (req, res) => {
 
         for (const [key, list] of Object.entries(masterState)) {
             if (Array.isArray(list)) {
-                const match = list.find(item => String(item.id) === String(docId));
+                const match = list.file ? null : list.find(item => String(item.id) === String(docId));
                 if (match) {
                     const isQuote = key.includes('quotation') || match.type === 'quotation';
                     foundDoc = {
