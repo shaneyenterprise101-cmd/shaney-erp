@@ -36,7 +36,7 @@ app.get('/', (req, res) => {
     }
 });
 
-// 🟢 NEW: Backend Login Authentication Route
+// Backend Login Authentication Route
 app.post('/api/login', async (req, res) => {
     try {
         const { email, password } = req.body;
@@ -126,7 +126,7 @@ app.get('/api/logs', (req, res) => {
     }
 });
 
-// 4. Post New Office Live Log
+// 4. Post New Office Live Log (Capped strictly to 50 logs)
 app.post('/api/logs', (req, res) => {
     try {
         const { action, staff } = req.body;
@@ -140,7 +140,7 @@ app.post('/api/logs', (req, res) => {
                 time: now.toLocaleTimeString()
             };
             officeLogs.unshift(newLog);
-            if (officeLogs.length > 1000) officeLogs.pop();
+            if (officeLogs.length > 50) officeLogs.pop();
         }
         res.json({ success: true, logs: officeLogs });
     } catch (err) {
