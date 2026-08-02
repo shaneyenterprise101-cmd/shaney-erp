@@ -48,7 +48,17 @@ export default function Settings() {
   const [showPhoneModal, setShowPhoneModal] = useState(false);
   const [showQrModal, setShowQrModal] = useState(false);
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [timer, setTimer] = useState(10);
+
+  // 🟢 Foolproof QR Image Generator / Fallback Handler
+  const processAndSetQr = (rawQr) => {
+    if (!rawQr) return;
+    if (rawQr.startsWith('data:image') || rawQr.startsWith('http')) {
+      setWaQrCode(rawQr);
+    } else {
+      const encoded = encodeURIComponent(rawQr);
+      setWaQrCode(`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encoded}`);
+    }
+  };
 
   useEffect(() => {
     if (window.require) {
@@ -58,7 +68,7 @@ export default function Settings() {
           setWaStatus(status);
           if (phone) setConnectedPhone(phone);
           if (qr) {
-            setWaQrCode(qr);
+            processAndSetQr(qr);
             setShowQrModal(true);
           }
           if (status === 'Connected') {
@@ -80,25 +90,12 @@ export default function Settings() {
     }
   }, []);
 
-  // 🟢 10-Second Timer with Auto-Close
-  useEffect(() => {
-    let interval = null;
-    if (showQrModal && timer > 0) {
-      interval = setInterval(() => {
-        setTimer((prev) => prev - 1);
-      }, 1000);
-    } else if (timer === 0 && showQrModal) {
-      setShowQrModal(false); 
-    }
-    return () => clearInterval(interval);
-  }, [showQrModal, timer]);
-
   const handleConnectClick = () => {
     setPhoneNumber('');
     setShowPhoneModal(true);
   };
 
-  const handlePhoneSubmit = (e) => {
+  const handlePhoneSubmit = async (e) => {
     e.preventDefault();
     if (!phoneNumber.trim()) {
       alert('Please enter a valid mobile number!');
@@ -106,7 +103,6 @@ export default function Settings() {
     }
     setShowPhoneModal(false);
     setConnectedPhone(phoneNumber.trim());
-    setTimer(10); 
     setWaQrCode('');
     setShowQrModal(true);
     
@@ -114,14 +110,32 @@ export default function Settings() {
       const { ipcRenderer } = window.require('electron');
       if (ipcRenderer) {
         setWaStatus('Scanning');
-        ipcRenderer.invoke('trigger-wa-connect', { phone: phoneNumber.trim() }).then(res => {
+        try {
+          const res = await ipcRenderer.invoke('trigger-wa-connect', { phone: phoneNumber.trim() });
           if (res) {
             setWaStatus(res.status || 'Scanning');
-            if (res.qr) setWaQrCode(res.qr);
+            if (res.qr) processAndSetQr(res.qr);
           }
-        }).catch(err => {
+        } catch (err) {
           console.error("Failed to connect WA:", err);
-        });
+        }
+      }
+    }
+  };
+
+  const handleRegenerateQr = async () => {
+    setWaQrCode('');
+    if (window.require && connectedPhone) {
+      const { ipcRenderer } = window.require('electron');
+      if (ipcRenderer) {
+        try {
+          const res = await ipcRenderer.invoke('trigger-wa-connect', { phone: connectedPhone });
+          if (res && res.qr) {
+            processAndSetQr(res.qr);
+          }
+        } catch (err) {
+          console.error("Regenerate QR error:", err);
+        }
       }
     }
   };
@@ -522,14 +536,20 @@ export default function Settings() {
           </div>
         )}
 
-        {/* 2. QR Code Popup Modal with 10s Timer & Auto-Close */}
+        {/* 2. QR Code Popup Modal (Timer removed, Refresh QR added) */}
         {showQrModal && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50">
             <div className="bg-white p-6 rounded-2xl shadow-xl w-80 border border-slate-200 flex flex-col items-center animate-[fadeIn_0.2s_ease-in-out]">
-              <h3 className="font-black text-xs text-slate-800 uppercase mb-2">Scan WhatsApp QR</h3>
+              <h3 className="font-black text-xs text-slate-800 uppercase mb-3">Scan WhatsApp QR</h3>
               
-              <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-xs font-bold mb-4 border border-emerald-200">
-                ⏱️ Closing in {timer}s
+              <div className="flex justify-end w-full mb-3">
+                <button 
+                  type="button" 
+                  onClick={handleRegenerateQr}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 underline cursor-pointer"
+                >
+                  🔄 Refresh QR
+                </button>
               </div>
 
               {waQrCode ? (

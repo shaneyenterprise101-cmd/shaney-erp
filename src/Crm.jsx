@@ -31,18 +31,37 @@ const logActionToBackend = async (actionText) => {
   }
 };
 
+// 🟢 Rate Limiter Helper: Max 10 items per 1 second to maintain safe Read/Write performance
+const processInBatches = async (items, batchSize = 10, delayMs = 1000, asyncTaskCallback) => {
+  let results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchPromises = batch.map(item => asyncTaskCallback(item));
+    const batchResults = await Promise.all(batchPromises);
+    results.push(...batchResults);
+
+    if (i + batchSize < items.length) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  return results;
+};
+
 export default function Crm({ selectedFY }) {
   const parseSafeDate = (dateStr) => {
     if (!dateStr) return null;
     if (typeof dateStr !== 'string') return new Date(dateStr);
     
-    if (dateStr.includes('-') || dateStr.includes('/')) {
-      const parts = dateStr.split(/[-/]/);
+    let clean = String(dateStr).trim();
+    if (clean.includes('/')) clean = clean.replace(/\//g, '-');
+
+    if (clean.includes('-')) {
+      const parts = clean.split('-');
       if (parts.length === 3) {
         if (parts[0].length === 4) {
-          return new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]));
+          return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
         } else {
-          return new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+          return new Date(parseInt(parts[2], 10), parseInt(parts[1], 10) - 1, parseInt(parts[0], 10));
         }
       }
     }
@@ -53,7 +72,6 @@ export default function Crm({ selectedFY }) {
     try {
       const saved = localStorage.getItem('ERP_CRM_v9');
       let initialCrm = saved ? JSON.parse(saved) : [];
-      // 🟢 Migration fallback check for old records missing updatedAt
       initialCrm = initialCrm.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
 
       const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
@@ -65,7 +83,7 @@ export default function Crm({ selectedFY }) {
           if (vDateObj && !isNaN(vDateObj.getTime())) {
             vDateObj.setHours(0, 0, 0, 0);
             if (vDateObj.getTime() < todayTime) {
-              const exists = initialCrm.find(c => c.name.toLowerCase() === b.party.toLowerCase() && c.isErpOverdue);
+              const exists = initialCrm.find(c => c.name && b.party && c.name.toLowerCase() === b.party.toLowerCase() && c.isErpOverdue);
               if (!exists) {
                 initialCrm.push({
                   id: 'erp_overdue_' + b.id,
@@ -121,7 +139,7 @@ export default function Crm({ selectedFY }) {
   const [isImporting, setIsImporting] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10; // 🟢 Set to 10 rows per page
+  const rowsPerPage = 10;
 
   const [selectedIds, setSelectedIds] = useState([]);
   const [bulkStaff, setBulkStaff] = useState('');
@@ -148,7 +166,6 @@ export default function Crm({ selectedFY }) {
   const [rawExcelRows, setRawExcelRows] = useState([]);
   const [previewColumns, setPreviewColumns] = useState([]);
 
-  // 🟢 REAL-TIME LIVE SYNC & EVENT LISTENER FOR CRM VIA AWS DYNAMODB / RENDER BACKEND
   useEffect(() => {
     const fetchCrmFromCloud = async () => {
       try {
@@ -157,7 +174,6 @@ export default function Crm({ selectedFY }) {
           const allData = await res.json();
           if (allData && typeof allData === 'object') {
             let cloudCrm = [];
-            // Assuming master state object or array
             if (Array.isArray(allData)) {
               cloudCrm = allData.filter(item => item.docType === 'crm');
             } else if (allData.crm_leads && Array.isArray(allData.crm_leads)) {
@@ -196,7 +212,6 @@ export default function Crm({ selectedFY }) {
     };
 
     window.addEventListener('ERP_DATA_UPDATED', handleDataUpdated);
-
     return () => {
       window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdated);
     };
@@ -276,7 +291,6 @@ export default function Crm({ selectedFY }) {
   const totalPages = Math.ceil(filteredLeads.length / rowsPerPage) || 1;
   const paginatedLeads = filteredLeads.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
-  // 🟢 SAVE NEW LEAD WITH TIMESTAMP & SQLITE IPC + AWS SYNC
   const handleSaveNew = async (e) => {
     e.preventDefault();
     if (!addForm.name.trim()) return alert('Customer Name is mandatory!');
@@ -320,7 +334,7 @@ export default function Crm({ selectedFY }) {
       status: 'New',
       staff: '',
       reminderDate: '',
-      updatedAt: currentTimestamp // 🟢 Exact Timestamp
+      updatedAt: currentTimestamp
     };
 
     const updatedCrm = [...crmData, newLead];
@@ -501,7 +515,7 @@ export default function Crm({ selectedFY }) {
     if (confirm('Delete ' + selectedIds.length + ' selected leads?')) {
       setCrmData(crmData.filter(c => !selectedIds.includes(c.id)));
       
-      for (let id of selectedIds) {
+      await processInBatches(selectedIds, 10, 1000, async (id) => {
         try { 
           await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
           if (window.require) {
@@ -509,7 +523,7 @@ export default function Crm({ selectedFY }) {
             if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id, deleted: true, updatedAt: Date.now() });
           }
         } catch(e){}
-      }
+      });
 
       setSelectedIds([]);
       logActionToBackend(`Deleted multiple CRM leads`);
@@ -522,7 +536,7 @@ export default function Crm({ selectedFY }) {
     const updatedCrm = crmData.map(c => selectedIds.includes(c.id) ? { ...c, staff: bulkStaff === 'UNASSIGNED' ? '' : bulkStaff, updatedAt: currentTimestamp } : c);
     setCrmData(updatedCrm);
 
-    for (let id of selectedIds) {
+    await processInBatches(selectedIds, 10, 1000, async (id) => {
       const l = updatedCrm.find(c => c.id === id);
       try { 
         await fetch(`${BACKEND_URL}/api/data`, {
@@ -535,7 +549,7 @@ export default function Crm({ selectedFY }) {
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', l);
         }
       } catch(e){}
-    }
+    });
 
     setSelectedIds([]);
     setBulkStaff('');
@@ -664,7 +678,6 @@ export default function Crm({ selectedFY }) {
 
     logActionToBackend(`SENT CRM WHATSAPP MESSAGE TO ${companyName} -> ${contactLabel}`);
     
-    // 🟢 1 Second delay before opening WhatsApp as requested
     setTimeout(() => {
       window.open('https://wa.me/91' + cleanPhone, '_blank');
     }, 1000);
@@ -797,6 +810,8 @@ export default function Crm({ selectedFY }) {
       let newBatch = [...crmData];
       const currentTimestamp = Date.now();
 
+      let leadsToUpload = [];
+
       for (let idx = 0; idx < rawExcelRows.length; idx++) {
         let row = rawExcelRows[idx];
         const findVal = (keys) => {
@@ -859,20 +874,24 @@ export default function Crm({ selectedFY }) {
             updatedAt: currentTimestamp
           };
           newBatch.push(leadObj);
-          try { 
-            await fetch(`${BACKEND_URL}/api/data`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ type: 'crm_leads', id: String(leadId), data: leadObj })
-            });
-            if (window.require) {
-              const { ipcRenderer } = window.require('electron');
-              if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', leadObj);
-            }
-          } catch(e){}
+          leadsToUpload.push(leadObj);
           count++;
         }
       }
+
+      await processInBatches(leadsToUpload, 10, 1000, async (leadObj) => {
+        try { 
+          await fetch(`${BACKEND_URL}/api/data`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ type: 'crm_leads', id: String(leadObj.id), data: leadObj })
+          });
+          if (window.require) {
+            const { ipcRenderer } = window.require('electron');
+            if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', leadObj);
+          }
+        } catch(e){}
+      });
 
       setCrmData(newBatch);
       setPreviewModalOpen(false);
@@ -1053,7 +1072,7 @@ export default function Crm({ selectedFY }) {
               </div>
               
               <button type="submit" className="w-full bg-[#00a67e] text-white py-3 rounded-lg font-black uppercase tracking-widest text-xs hover:bg-emerald-600 shadow-md mt-2 transition-all cursor-pointer flex items-center justify-center gap-1.5">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H3m-1 4l-3 3m0 0l-3-3m3 3V4"/></svg>
                 Save Record
               </button>
             </form>
@@ -1397,22 +1416,17 @@ export default function Crm({ selectedFY }) {
                           <p className="text-[11px] font-bold text-slate-500 mt-0.5">{locString}</p>
                         </div>
 
+                        {/* MOBILE CONTACT SECTION - TOUCH TO EDIT ENABLED */}
                         <div className="flex flex-col gap-2 bg-slate-50 p-2.5 rounded-xl border border-slate-100">
                           {c.m1 || c.p1 ? (
                             <div className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
-                              <div className="flex flex-col min-w-0 flex-1 pr-2">
+                              <div onClick={(e) => openEditModal(c, e)} className="flex flex-col min-w-0 flex-1 pr-2 cursor-pointer" title="Click to Edit Contact">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-bold text-slate-800 text-[10px] uppercase truncate">{c.p1 || 'Contact 1'}</span>
                                   {countM1 > 0 && (
-                                    <span className="inline-flex items-center text-[#25D366] bg-green-50 px-1 py-0.2 rounded border border-green-200" title={`WhatsApp sent ${countM1} time(s)`}>
+                                    <span className="inline-flex items-center text-[#25D366] bg-green-50 px-1 py-0.2 rounded border border-green-200">
                                       <svg className="w-3 h-3 fill-current inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                                       <span className="text-[9px] font-black ml-0.5">{countM1}</span>
-                                    </span>
-                                  )}
-                                  {callCountM1 > 0 && (
-                                    <span className="inline-flex items-center text-blue-600 bg-blue-50 px-1 py-0.2 rounded border border-blue-200 ml-1" title={`Called ${callCountM1} time(s)`}>
-                                      <svg className="w-3 h-3 fill-current inline" viewBox="0 0 24 24"><path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
-                                      <span className="text-[9px] font-black ml-0.5">{callCountM1}</span>
                                     </span>
                                   )}
                                 </div>
@@ -1424,19 +1438,13 @@ export default function Crm({ selectedFY }) {
 
                           {c.m2 || c.p2 ? (
                             <div className="flex items-center justify-between bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
-                              <div className="flex flex-col min-w-0 flex-1 pr-2">
+                              <div onClick={(e) => openEditModal(c, e)} className="flex flex-col min-w-0 flex-1 pr-2 cursor-pointer" title="Click to Edit Contact">
                                 <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-bold text-slate-700 text-[10px] uppercase truncate">{c.p2 || 'Contact 2'}</span>
                                   {countM2 > 0 && (
-                                    <span className="inline-flex items-center text-[#25D366] bg-green-50 px-1 py-0.2 rounded border border-green-200" title={`WhatsApp sent ${countM2} time(s)`}>
+                                    <span className="inline-flex items-center text-[#25D366] bg-green-50 px-1 py-0.2 rounded border border-green-200">
                                       <svg className="w-3 h-3 fill-current inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                                       <span className="text-[9px] font-black ml-0.5">{countM2}</span>
-                                    </span>
-                                  )}
-                                  {callCountM2 > 0 && (
-                                    <span className="inline-flex items-center text-blue-600 bg-blue-50 px-1 py-0.2 rounded border border-blue-200 ml-1" title={`Called ${callCountM2} time(s)`}>
-                                      <svg className="w-3 h-3 fill-current inline" viewBox="0 0 24 24"><path d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"/></svg>
-                                      <span className="text-[9px] font-black ml-0.5">{callCountM2}</span>
                                     </span>
                                   )}
                                 </div>

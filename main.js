@@ -54,20 +54,31 @@ function initDatabase() {
 
 async function connectWhatsApp(phone = '') {
   try {
+    console.log('🔄 Initializing WhatsApp connection for phone:', phone);
+    if (sock) {
+      try { await sock.logout(); } catch(e) {}
+      sock = null;
+    }
+
     const authPath = path.join(app.getPath('userData'), 'baileys_auth_info');
+    console.log('📁 Auth state path:', authPath);
+    
     const { state, saveCreds } = await useMultiFileAuthState(authPath);
 
     sock = makeWASocket({
       auth: state,
-      logger: pino({ level: 'silent' })
+      logger: pino({ level: 'silent' }),
+      printQRInTerminal: false
     });
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
+      console.log('📡 Connection update received:', update);
       const { connection, lastDisconnect, qr } = update;
       
       if (qr) {
+        console.log('📱 QR code string received from Baileys!');
         currentWaStatus = 'Scanning';
         lastQrDataUrl = await QRCode.toDataURL(qr);
         if (mainWindow) {
@@ -76,6 +87,7 @@ async function connectWhatsApp(phone = '') {
       }
 
       if (connection === 'close') {
+        console.log('❌ Connection closed:', lastDisconnect?.error);
         currentWaStatus = 'Disconnected';
         lastQrDataUrl = '';
         if (mainWindow) {
@@ -83,7 +95,8 @@ async function connectWhatsApp(phone = '') {
         }
         const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
         if (shouldReconnect) {
-          connectWhatsApp(phone);
+          console.log('🔁 Reconnecting WhatsApp in 3 seconds...');
+          setTimeout(() => connectWhatsApp(phone), 3000);
         }
       } else if (connection === 'open') {
         currentWaStatus = 'Connected';
@@ -95,7 +108,7 @@ async function connectWhatsApp(phone = '') {
       }
     });
   } catch (err) {
-    console.error("WhatsApp connection error:", err);
+    console.error("❌ WhatsApp connection error exception:", err);
   }
 }
 
@@ -104,15 +117,15 @@ function setupIpcHandlers() {
     return { status: currentWaStatus, qr: lastQrDataUrl };
   });
 
-  ipcMain.handle('trigger-wa-connect', (event, data) => {
+  ipcMain.handle('trigger-wa-connect', async (event, data) => {
     const phone = data?.phone || '';
+    console.log('⚡ IPC trigger-wa-connect called with phone:', phone);
     if (currentWaStatus !== 'Connected') {
-      connectWhatsApp(phone);
+      await connectWhatsApp(phone);
     }
     return { status: currentWaStatus, qr: lastQrDataUrl, phone };
   });
 
-  // WhatsApp Logout / Disconnect Handler
   ipcMain.handle('wa-logout', async () => {
     try {
       if (sock) {
@@ -193,7 +206,6 @@ function setupIpcHandlers() {
       const formattedPhone = phone.includes('@s.whatsapp.net') ? phone : `${phone}@s.whatsapp.net`;
       await sock.sendMessage(formattedPhone, { text: message });
       
-      // Save to logs
       const logId = 'log_' + Date.now();
       const sentTime = new Date().toLocaleString();
       db.prepare(`INSERT INTO whatsapp_logs (id, sender, receiver, status, sentOn) VALUES (?, ?, ?, ?, ?)`).run(logId, 'ADMIN', phone, 'Success', sentTime);
@@ -230,7 +242,6 @@ app.whenReady().then(() => {
   initDatabase();
   setupIpcHandlers();
   createWindow();
-  connectWhatsApp();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
