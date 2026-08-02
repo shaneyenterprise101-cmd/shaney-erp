@@ -60,7 +60,10 @@ export default function Settings() {
     }
   };
 
+  // 🟢 Robust Baileys QR Poller / IPC Listener for both Electron & Web
   useEffect(() => {
+    let qrInterval = null;
+
     if (window.require) {
       const { ipcRenderer } = window.require('electron');
       if (ipcRenderer) {
@@ -88,7 +91,31 @@ export default function Settings() {
         }).catch(e => {});
       }
     }
-  }, []);
+
+    // 🟢 Cloud / Web Backend QR polling fallback if modal is open
+    if (showQrModal) {
+      qrInterval = setInterval(async () => {
+        try {
+          const res = await fetch(`${BACKEND_URL}/api/whatsapp/status`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status) setWaStatus(data.status);
+            if (data.qr) {
+              processAndSetQr(data.qr);
+            }
+            if (data.status === 'Connected') {
+              setShowQrModal(false);
+              setShowPhoneModal(false);
+            }
+          }
+        } catch (err) {}
+      }, 3000);
+    }
+
+    return () => {
+      if (qrInterval) clearInterval(qrInterval);
+    };
+  }, [showQrModal]);
 
   const handleConnectClick = () => {
     setPhoneNumber('');
@@ -117,9 +144,20 @@ export default function Settings() {
             if (res.qr) processAndSetQr(res.qr);
           }
         } catch (err) {
-          console.error("Failed to connect WA:", err);
+          console.error("Failed to connect WA via IPC:", err);
         }
       }
+    }
+
+    // Also trigger Cloud Backend WhatsApp Connect API if applicable
+    try {
+      await fetch(`${BACKEND_URL}/api/whatsapp/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phoneNumber.trim() })
+      });
+    } catch (err) {
+      console.error("Cloud WA connect error:", err);
     }
   };
 
@@ -137,6 +175,16 @@ export default function Settings() {
           console.error("Regenerate QR error:", err);
         }
       }
+    }
+
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/whatsapp/refresh`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.qr) processAndSetQr(data.qr);
+      }
+    } catch (err) {
+      console.error("Cloud Refresh QR error:", err);
     }
   };
 
@@ -157,6 +205,12 @@ export default function Settings() {
           });
         }
       }
+      fetch(`${BACKEND_URL}/api/whatsapp/logout`, { method: 'POST' }).catch(e => {});
+      setWaStatus('Disconnected');
+      setWaQrCode('');
+      setConnectedPhone('');
+      setShowQrModal(false);
+      alert('🔌 WhatsApp Disconnected Successfully!');
     }
   };
 

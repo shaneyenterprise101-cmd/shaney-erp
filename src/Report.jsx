@@ -31,14 +31,18 @@ const logActionToBackend = async (actionText) => {
   }
 };
 
-// 🟢 Rate Limiter Helper: Max 10 items per 1 second to maintain safe Read/Write performance
-const processInBatches = async (items, batchSize = 10, delayMs = 1000, asyncTaskCallback) => {
+// 🟢 1-by-1 Safe Sequential Rate Limiter: Exactly 1 item per 1 second with live progress counter
+const processInBatchesWithProgress = async (items, batchSize = 1, delayMs = 1000, asyncTaskCallback, onProgress) => {
   let results = [];
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
     const batchPromises = batch.map(item => asyncTaskCallback(item));
     const batchResults = await Promise.all(batchPromises);
     results.push(...batchResults);
+
+    if (onProgress) {
+      onProgress(Math.min(i + batchSize, items.length), items.length);
+    }
 
     if (i + batchSize < items.length) {
       await new Promise(resolve => setTimeout(resolve, delayMs));
@@ -81,6 +85,7 @@ export default function Report({ selectedFY }) {
   
   const [selectedFile, setSelectedFile] = useState(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
 
   const [availableFYs, setAvailableFYs] = useState(() => {
     const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
@@ -276,9 +281,11 @@ export default function Report({ selectedFY }) {
     reader.readAsArrayBuffer(selectedFile);
   };
 
-  // 🟢 THROTTLED CONFIRM MIRROR IMPORT (Max 10 files per second + Spinner)
+  // 🟢 1-by-1 Safe Sequential Import with Spinner & Live Counter
   const confirmMirrorImport = async () => {
     setIsSyncing(true);
+    setImportProgress({ current: 0, total: rawExcelData.length });
+
     try {
       let history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
       let customers = JSON.parse(localStorage.getItem('ERP_Customers_v104') || '[]');
@@ -478,30 +485,52 @@ export default function Report({ selectedFY }) {
       localStorage.setItem('ERP_History_v104', JSON.stringify(history));
       localStorage.setItem('ERP_Customers_v104', JSON.stringify(customers));
 
-      // 🟢 Throttled Upload: Max 10 items per 1 second
-      await processInBatches(newHistoryItems, 10, 1000, async (hItem) => {
+      let totalFilesToSync = newHistoryItems.length + newCustomerItems.length;
+      let currentSyncedFiles = 0;
+      setImportProgress({ current: 0, total: totalFilesToSync });
+
+      // 🟢 1-by-1 Safe Sequential Upload (1 item per 1 second) with live counting
+      await processInBatchesWithProgress(newHistoryItems, 1, 1000, async (hItem) => {
+        let correctType = hItem.docType || 'certificates';
+        if (correctType === 'certificate') correctType = 'certificates';
+        if (correctType === 'quotation') correctType = 'quotations';
+        if (correctType === 'customer') correctType = 'customers';
+        if (correctType === 'product') correctType = 'products';
+
         await fetch(`${BACKEND_URL}/api/data`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'certificates', id: String(hItem.id), data: hItem })
+          body: JSON.stringify({ type: correctType, id: String(hItem.id), data: hItem })
         });
         localStorage.removeItem(`shaney_certificate_${hItem.id}`);
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', hItem);
         }
+      }, (curr) => {
+        currentSyncedFiles = curr;
+        setImportProgress({ current: currentSyncedFiles, total: totalFilesToSync });
       });
 
-      await processInBatches(newCustomerItems, 10, 1000, async (cItem) => {
+      await processInBatchesWithProgress(newCustomerItems, 1, 1000, async (cItem) => {
+        let correctType = cItem.docType || 'customers';
+        if (correctType === 'certificate') correctType = 'certificates';
+        if (correctType === 'quotation') correctType = 'quotations';
+        if (correctType === 'customer') correctType = 'customers';
+        if (correctType === 'product') correctType = 'products';
+
         await fetch(`${BACKEND_URL}/api/data`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'customers', id: String(cItem.id), data: cItem })
+          body: JSON.stringify({ type: correctType, id: String(cItem.id), data: cItem })
         });
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', cItem);
         }
+      }, (curr) => {
+        currentSyncedFiles = newHistoryItems.length + curr;
+        setImportProgress({ current: currentSyncedFiles, total: totalFilesToSync });
       });
 
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'certificates' } }));
@@ -590,27 +619,36 @@ export default function Report({ selectedFY }) {
     }
   };
 
-  // 🟢 THROTTLED FORCE UPLOAD (Max 10 files per second + Spinner)
+  // 🟢 1-by-1 Safe Force Upload with Spinner & Counter
   const handleCloudUpload = async () => {
     setIsSyncing(true);
     try {
       const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
       let uploadedCount = 0;
+      setImportProgress({ current: 0, total: history.length });
 
-      await processInBatches(history, 10, 1000, async (item) => {
+      await processInBatchesWithProgress(history, 1, 1000, async (item) => {
         if (!item.updatedAt) {
           item.updatedAt = Date.now();
         }
+        let correctType = item.docType || 'certificates';
+        if (correctType === 'certificate') correctType = 'certificates';
+        if (correctType === 'quotation') correctType = 'quotations';
+        if (correctType === 'customer') correctType = 'customers';
+        if (correctType === 'product') correctType = 'products';
+
         await fetch(`${BACKEND_URL}/api/data`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'certificates', id: String(item.id), data: item })
+          body: JSON.stringify({ type: correctType, id: String(item.id), data: item })
         });
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', item);
         }
         uploadedCount++;
+      }, (curr) => {
+        setImportProgress({ current: curr, total: history.length });
       });
 
       setIsSyncing(false);
@@ -622,7 +660,7 @@ export default function Report({ selectedFY }) {
     }
   };
 
-  // 🟢 THROTTLED SYNC/DOWNLOAD (Max 10 files per second + Spinner)
+  // 🟢 1-by-1 Safe Sync/Download with Spinner & Counter
   const handleCloudDownload = async () => {
     setIsSyncing(true);
     try {
@@ -638,8 +676,9 @@ export default function Report({ selectedFY }) {
 
         let history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
         let newRecordsCount = 0;
+        setImportProgress({ current: 0, total: cloudCerts.length });
 
-        await processInBatches(cloudCerts, 10, 1000, async (cloudData) => {
+        await processInBatchesWithProgress(cloudCerts, 1, 1000, async (cloudData) => {
           const index = history.findIndex(h => h.id === cloudData.id);
           if (index !== -1) {
             history[index] = cloudData; 
@@ -652,6 +691,8 @@ export default function Report({ selectedFY }) {
             if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', cloudData);
           }
           newRecordsCount++;
+        }, (curr) => {
+          setImportProgress({ current: curr, total: cloudCerts.length });
         });
 
         localStorage.setItem('ERP_History_v104', JSON.stringify(history));
@@ -674,12 +715,15 @@ export default function Report({ selectedFY }) {
     <div className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
       <div className="max-w-7xl mx-auto pb-10">
       
-      {/* 🟢 GLOBAL LOADING SPINNER SCREEN */}
+      {/* 🟢 SPINNING LOADER & LIVE CLOUD COUNTER SCREEN */}
       {isSyncing && (
-        <div className="fixed inset-0 bg-slate-950/70 z-[999999] flex flex-col items-center justify-center backdrop-blur-md">
-          <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <h2 className="text-white font-black text-lg uppercase tracking-widest">Processing (Max 10 files/sec)...</h2>
-          <p className="text-slate-300 text-xs font-bold mt-1">Please wait while maintaining safe Read/Write performance.</p>
+        <div className="fixed inset-0 bg-slate-950/80 z-[999999] flex flex-col items-center justify-center backdrop-blur-md">
+          <div className="w-16 h-16 border-4 border-[#00a67e] border-t-transparent rounded-full animate-spin mb-4"></div>
+          <h2 className="text-white font-black text-lg uppercase tracking-widest">Processing (1 by 1 Safe Sync)...</h2>
+          <p className="text-[#00a67e] text-sm font-black mt-2 font-mono bg-emerald-950/80 px-4 py-2 rounded-xl border border-emerald-500/30">
+            Cloud Files Processed: {importProgress.current} / {importProgress.total}
+          </p>
+          <p className="text-slate-400 text-xs font-bold mt-2">Please wait while maintaining safe Read/Write performance.</p>
         </div>
       )}
 

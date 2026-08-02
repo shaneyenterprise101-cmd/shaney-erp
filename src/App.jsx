@@ -13,7 +13,6 @@ import Crm from './Crm.jsx';
 import Envelope from './Envelope.jsx'; 
 import Sticker from './Sticker.jsx';
 
-// 🟢 Local logo asset import (Vercel & Build safe)
 import logoImage from './logo.jpg'; 
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
@@ -33,7 +32,7 @@ export default function App() {
   const [previewDocData, setPreviewDocData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(isPreviewRoute);
 
-  // 🟢 Optimized Background Auto Delta Sync Worker (Runs every 10 Seconds with minimum reads/writes)
+  // 🟢 Optimized Background Auto Delta Sync Worker (Fixed plural/singular mismatch)
   useEffect(() => {
     const runRealtimeSync = async () => {
       try {
@@ -43,13 +42,19 @@ export default function App() {
 
         const lastSync = Number(localStorage.getItem('ERP_Last_Sync_Timestamp') || 0);
         
-        // 1. Push local new/updated records to Render Backend (Minimum Writes: only changed records)
+        // 1. Push local new/updated records to Render Backend with correct plural types
         const deltaRecords = await ipcRenderer.invoke('sqlite-get-delta-records', lastSync);
         for (let rec of deltaRecords) {
+           let correctType = rec.docType || 'certificates';
+           if (correctType === 'certificate') correctType = 'certificates';
+           if (correctType === 'quotation') correctType = 'quotations';
+           if (correctType === 'customer') correctType = 'customers';
+           if (correctType === 'product') correctType = 'products';
+
            await fetch(`${BACKEND_URL}/api/data`, {
              method: 'POST',
              headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ type: rec.docType || 'certificates', id: String(rec.id), data: rec })
+             body: JSON.stringify({ type: correctType, id: String(rec.id), data: rec })
            });
         }
 
@@ -73,7 +78,7 @@ export default function App() {
     };
 
     runRealtimeSync();
-    const syncInterval = setInterval(runRealtimeSync, 10000); // Optimized to 10 seconds to prevent file flooding
+    const syncInterval = setInterval(runRealtimeSync, 10000); 
     return () => clearInterval(syncInterval);
   }, []);
 
@@ -322,7 +327,6 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // 🟢 DIRECT BACKEND & LOCAL ADMIN/STAFF LOGIN (No Firebase Dependency)
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -354,7 +358,6 @@ export default function App() {
       }
     };
 
-    // 1. Check if Admin Login (Default Master Admin Credential)
     if (inputVal.toLowerCase() === 'shaneyenterprise101@gmail.com' || inputVal.toLowerCase() === 'admin') {
       if (password === 'Shaney@123' || password === 'admin123') {
         const adminUser = { 
@@ -374,7 +377,6 @@ export default function App() {
       }
     }
 
-    // 2. Check Staff Login
     let currentStaffList = staffList;
     let foundStaff = currentStaffList.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
 

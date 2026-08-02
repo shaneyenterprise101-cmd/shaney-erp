@@ -215,6 +215,38 @@ app.post('/api/data', async (req, res) => {
     }
 });
 
+// 7. Delete Record from DynamoDB (Matches Frontend DELETE Requests)
+app.delete('/api/data/:id', async (req, res) => {
+    try {
+        const targetId = req.params.id;
+        const scanResult = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
+        let deleted = false;
+
+        for (const record of scanResult.Items) {
+            if (record.data && Array.isArray(record.data)) {
+                const initialLen = record.data.length;
+                const filteredData = record.data.filter(i => String(i.id) !== String(targetId));
+                if (filteredData.length < initialLen) {
+                    await dynamo.send(new PutCommand({
+                        TableName: TABLE_NAME,
+                        Item: {
+                            id: record.id,
+                            data: filteredData,
+                            updatedAt: new Date().toISOString()
+                        }
+                    }));
+                    deleted = true;
+                }
+            }
+        }
+
+        res.json({ success: true, deleted });
+    } catch (err) {
+        console.error("DELETE /api/data/:id error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🖥️ Shaney ERP Backend connected to AWS DynamoDB on port ${PORT}`);

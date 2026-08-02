@@ -31,8 +31,8 @@ const logActionToBackend = async (actionText) => {
   }
 };
 
-// 🟢 Rate Limiter Helper: Max 10 items per 1 second to maintain safe Read/Write performance
-const processInBatches = async (items, batchSize = 10, delayMs = 1000, asyncTaskCallback) => {
+// 🟢 1-by-1 Safe Sequential Rate Limiter: Exactly 1 item per 1 second with progress callback
+const processInBatchesWithProgress = async (items, batchSize = 1, delayMs = 1000, asyncTaskCallback, onProgress) => {
   let results = [];
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
@@ -40,11 +40,29 @@ const processInBatches = async (items, batchSize = 10, delayMs = 1000, asyncTask
     const batchResults = await Promise.all(batchPromises);
     results.push(...batchResults);
 
+    if (onProgress) {
+      onProgress(Math.min(i + batchSize, items.length), items.length);
+    }
+
     if (i + batchSize < items.length) {
       await new Promise(resolve => setTimeout(resolve, delayMs));
     }
   }
   return results;
+};
+
+// 🟢 Bulletproof Data Sanitizer with Timestamp Fallback
+const sanitizeForCloud = (dataObj) => {
+  let cleaned = { ...dataObj };
+  if (!cleaned.updatedAt) {
+    cleaned.updatedAt = Date.now();
+  }
+  Object.keys(cleaned).forEach(key => {
+    if (cleaned[key] === undefined) {
+      cleaned[key] = null;
+    }
+  });
+  return cleaned;
 };
 
 export default function Crm({ selectedFY }) {
@@ -137,6 +155,7 @@ export default function Crm({ selectedFY }) {
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   
   const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
 
   const [currentPage, setCurrentPage] = useState(1);
   const rowsPerPage = 10;
@@ -320,7 +339,7 @@ export default function Crm({ selectedFY }) {
     const leadId = 'crm_' + Date.now();
     const currentTimestamp = Date.now();
 
-    const newLead = {
+    const newLead = sanitizeForCloud({
       id: leadId,
       docType: 'crm',
       name: addForm.name.trim(),
@@ -335,7 +354,7 @@ export default function Crm({ selectedFY }) {
       staff: '',
       reminderDate: '',
       updatedAt: currentTimestamp
-    };
+    });
 
     const updatedCrm = [...crmData, newLead];
     setCrmData(updatedCrm);
@@ -365,7 +384,7 @@ export default function Crm({ selectedFY }) {
 
     const oldStatus = lead.status;
     const currentTimestamp = Date.now();
-    const updatedLead = { ...lead, status: newStatus, updatedAt: currentTimestamp };
+    const updatedLead = sanitizeForCloud({ ...lead, status: newStatus, updatedAt: currentTimestamp });
 
     const updatedCrm = crmData.map(c => c.id === id ? updatedLead : c);
     setCrmData(updatedCrm);
@@ -416,7 +435,7 @@ export default function Crm({ selectedFY }) {
       if (newStatus.toLowerCase() === 'closed') {
         const existingIndex = customers.findIndex(cust => cust.id === lead.id || (cust.name && cust.name.toLowerCase() === companyName.toLowerCase()));
 
-        const customerObj = {
+        const customerObj = sanitizeForCloud({
           id: lead.id,
           docType: 'customer',
           name: companyName,
@@ -432,7 +451,7 @@ export default function Crm({ selectedFY }) {
           contactPerson2: lead.p2 || '',
           mobile2: lead.m2 || '',
           updatedAt: currentTimestamp
-        };
+        });
 
         if (existingIndex !== -1) {
           customers[existingIndex] = customerObj;
@@ -473,7 +492,7 @@ export default function Crm({ selectedFY }) {
     const currentTimestamp = Date.now();
     const updatedCrm = crmData.map(c => c.id === id ? { ...c, reminderDate: newDate, updatedAt: currentTimestamp } : c);
     setCrmData(updatedCrm);
-    const updatedLead = updatedCrm.find(c => c.id === id);
+    const updatedLead = sanitizeForCloud(updatedCrm.find(c => c.id === id));
     try {
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
@@ -515,7 +534,8 @@ export default function Crm({ selectedFY }) {
     if (confirm('Delete ' + selectedIds.length + ' selected leads?')) {
       setCrmData(crmData.filter(c => !selectedIds.includes(c.id)));
       
-      await processInBatches(selectedIds, 10, 1000, async (id) => {
+      // 🟢 1-by-1 Safe Deletion (1 item per 1 second)
+      await processInBatches(selectedIds, 1, 1000, async (id) => {
         try { 
           await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
           if (window.require) {
@@ -536,8 +556,9 @@ export default function Crm({ selectedFY }) {
     const updatedCrm = crmData.map(c => selectedIds.includes(c.id) ? { ...c, staff: bulkStaff === 'UNASSIGNED' ? '' : bulkStaff, updatedAt: currentTimestamp } : c);
     setCrmData(updatedCrm);
 
-    await processInBatches(selectedIds, 10, 1000, async (id) => {
-      const l = updatedCrm.find(c => c.id === id);
+    // 🟢 1-by-1 Safe Assignment (1 item per 1 second)
+    await processInBatches(selectedIds, 1, 1000, async (id) => {
+      const l = sanitizeForCloud(updatedCrm.find(c => c.id === id));
       try { 
         await fetch(`${BACKEND_URL}/api/data`, {
           method: 'POST',
@@ -591,7 +612,7 @@ export default function Crm({ selectedFY }) {
     setCrmData(updatedCrm);
     setEditModalOpen(false);
 
-    const editedLead = updatedCrm.find(c => c.id === editForm.id);
+    const editedLead = sanitizeForCloud(updatedCrm.find(c => c.id === editForm.id));
     try {
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
@@ -658,7 +679,7 @@ export default function Crm({ selectedFY }) {
       });
 
       setCrmData(updatedCrm);
-      const updatedLead = updatedCrm.find(c => c.id === foundLead.id);
+      const updatedLead = sanitizeForCloud(updatedCrm.find(c => c.id === foundLead.id));
       try {
         await fetch(`${BACKEND_URL}/api/data`, {
           method: 'POST',
@@ -721,7 +742,7 @@ export default function Crm({ selectedFY }) {
       });
 
       setCrmData(updatedCrm);
-      const updatedLead = updatedCrm.find(c => c.id === foundLead.id);
+      const updatedLead = sanitizeForCloud(updatedCrm.find(c => c.id === foundLead.id));
       try {
         await fetch(`${BACKEND_URL}/api/data`, {
           method: 'POST',
@@ -757,7 +778,7 @@ export default function Crm({ selectedFY }) {
     setCrmData(updatedCrm);
     setNoteModalOpen(false);
 
-    const updatedLead = updatedCrm.find(c => c.id === activeNoteRecord.id);
+    const updatedLead = sanitizeForCloud(updatedCrm.find(c => c.id === activeNoteRecord.id));
     try {
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
@@ -802,9 +823,12 @@ export default function Crm({ selectedFY }) {
     e.target.value = '';
   };
 
+  // 🟢 1-by-1 Safe Excel Import with Spinning Wheel & Live File/Cloud Counter
   const confirmExcelImport = async () => {
     try {
       setIsImporting(true);
+      setImportProgress({ current: 0, total: rawExcelRows.length });
+
       let count = 0;
       let skippedCount = 0;
       let newBatch = [...crmData];
@@ -857,7 +881,7 @@ export default function Crm({ selectedFY }) {
           }
 
           const leadId = 'crm_ex_' + Date.now() + '_' + idx;
-          const leadObj = {
+          const leadObj = sanitizeForCloud({
             id: leadId,
             docType: 'crm',
             name: String(name).trim(),
@@ -872,14 +896,15 @@ export default function Crm({ selectedFY }) {
             staff: '',
             reminderDate: '',
             updatedAt: currentTimestamp
-          };
+          });
           newBatch.push(leadObj);
           leadsToUpload.push(leadObj);
           count++;
         }
       }
 
-      await processInBatches(leadsToUpload, 10, 1000, async (leadObj) => {
+      // 🟢 1-by-1 Sequential Safe Cloud Upload with live counter (1 item per 1 second)
+      await processInBatchesWithProgress(leadsToUpload, 1, 1000, async (leadObj) => {
         try { 
           await fetch(`${BACKEND_URL}/api/data`, {
             method: 'POST',
@@ -891,13 +916,15 @@ export default function Crm({ selectedFY }) {
             if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', leadObj);
           }
         } catch(e){}
+      }, (current, total) => {
+        setImportProgress({ current, total });
       });
 
       setCrmData(newBatch);
       setPreviewModalOpen(false);
       setIsImporting(false);
       logActionToBackend(`Imported ${count} CRM leads via Excel (Skipped ${skippedCount} exact duplicates)`);
-      alert(`✅ Successfully imported ${count} leads! (${skippedCount} exact duplicate entries skipped).`);
+      alert(`✅ Successfully imported ${count} leads to Cloud & Local! (${skippedCount} exact duplicate entries skipped).`);
     } catch (err) {
       setIsImporting(false);
       alert('❌ Import failed: ' + err.message);
@@ -906,6 +933,19 @@ export default function Crm({ selectedFY }) {
 
   return (
     <div id="tab-crm" className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-hidden animate-[fadeIn_0.3s_ease-in-out]">
+      
+      {/* 🟢 SPINNING LOADER & LIVE CLOUD COUNTER SCREEN */}
+      {isImporting && (
+        <div className="fixed inset-0 bg-slate-950/80 z-[999999] flex flex-col items-center justify-center backdrop-blur-md">
+          <div className="w-16 h-16 border-4 border-[#00a67e] border-t-transparent rounded-full animate-spin mb-4"></div>
+          <h2 className="text-white font-black text-lg uppercase tracking-widest">Uploading to Cloud (1 by 1)...</h2>
+          <p className="text-[#00a67e] text-sm font-black mt-2 font-mono bg-emerald-950/80 px-4 py-2 rounded-xl border border-emerald-500/30">
+            Cloud Files Uploaded: {importProgress.current} / {importProgress.total}
+          </p>
+          <p className="text-slate-400 text-xs font-bold mt-2">Please do not close this window while safe syncing is active.</p>
+        </div>
+      )}
+
       <div className="flex flex-row w-full h-full relative">
 
         {isMobileMenuOpen && (
@@ -1690,7 +1730,7 @@ export default function Crm({ selectedFY }) {
                   </tbody>
                 </table>
               </div>
-              <p className="text-[11px] text-slate-500 font-bold mt-3 text-center">Click 'Confirm & Import' to save these records into the CRM database.</p>
+              <p className="text-[11px] text-slate-500 font-bold mt-3 text-center">Click 'Confirm & Import' to save these records into the CRM database (1 by 1 safe upload).</p>
             </div>
 
             <div className="p-4 border-t border-slate-200 bg-white flex justify-end gap-3 rounded-b-2xl shrink-0 shadow-lg">
@@ -1699,7 +1739,7 @@ export default function Crm({ selectedFY }) {
                 {isImporting ? (
                   <>
                     <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a88 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-                    <span>Processing...</span>
+                    <span>Processing (1-by-1)...</span>
                   </>
                 ) : (
                   <>

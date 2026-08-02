@@ -758,7 +758,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     }
   };
 
-  // 🟢 AUTOMATIC SYNC CUSTOMER TO ERP_Customers_v104 ON CERTIFICATE SAVE / IMPORT
   const syncCustomerToDirectory = async (partyName, phoneNum, addressStr) => {
     if (!partyName) return;
     try {
@@ -897,7 +896,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
     setCertificates(allHistory.filter(b => b.docType === 'certificate'));
 
-    // 🟢 Automatically transfer / sync customer to Customer tab directory
     await syncCustomerToDirectory(formData.client, '', formData.address);
     
     try {
@@ -1301,7 +1299,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   };
 
   return (
-    <div id="tab-certificate" className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
+    <div id="tab-certificate" className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-3 sm:p-6 animate-[fadeIn_0.3s_ease-in-out]">
       <div className="max-w-7xl mx-auto pb-10">
 
         {isPreviewOpen && activePreviewCert && (
@@ -1348,7 +1346,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           </div>
         )}
 
-        {/* 🟢 MOBILE SLIDING DRAWER PREVIEW */}
         {isMobilePreviewOpen && (
           <div className="fixed inset-0 z-[99999] flex flex-col justify-end bg-slate-900/70 backdrop-blur-sm transition-all duration-300 lg:hidden">
             <div className="w-full h-[90vh] bg-slate-100 rounded-t-3xl flex flex-col shadow-2xl overflow-hidden animate-[slideUp_0.3s]">
@@ -1576,7 +1573,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
               </form>
             </div>
 
-            {/* FIXED NON-SCROLLING HORIZONTAL PREVIEW CONTAINER */}
             <div className="hidden lg:flex lg:col-span-7 bg-slate-300 p-6 rounded-2xl shadow-inner border border-slate-400 justify-center items-center overflow-y-auto overflow-x-hidden h-[78vh] w-full custom-scrollbar relative">
               <div className="m-auto flex justify-center items-center py-10 w-full">
                 <div className="origin-center transform scale-[0.5] sm:scale-[0.6] md:scale-[0.7] lg:scale-[0.65] xl:scale-[0.75] transition-transform shadow-2xl bg-white">
@@ -1590,56 +1586,57 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         {viewMode === 'list' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             
-            {/* 🟢 EXACT TWO-ROW COMPACT FILTER BAR MATCHING USER DRAWING */}
-            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3 mb-4">
+            <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3 mb-4">
               
-              {/* Row 1: Certificate Title, Summary Button, All Years, All Months (Left) | Search bar (Right) */}
-              <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-3 shrink-0">
+              {/* TOP MOBILE RESPONSIVE TOOLBAR */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <h2 className="flex items-center gap-2 text-sm font-black uppercase text-slate-800 tracking-wider">
                     CERTIFICATE
                   </h2>
                   <button 
                     onClick={() => setShowSummary(prev => !prev)} 
-                    className="bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 p-1.5 px-3 rounded-lg font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                    className="bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 px-3 py-2 rounded-lg font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer"
                   >
                     <svg className="w-3.5 h-3.5 text-blue-600 inline-block shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg> 
                     SUMMARY
                   </button>
 
-                  <select value={filterYearNum} onChange={(e) => setFilterYearNum(e.target.value)} style={{ width: '110px' }} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
-                    <option value="ALL">All Years</option>
-                    {availableYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
-                  </select>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <select value={filterYearNum} onChange={(e) => setFilterYearNum(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white flex-1 sm:w-[110px]">
+                      <option value="ALL">All Years</option>
+                      {availableYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
+                    </select>
 
-                  <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} style={{ width: '130px' }} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
-                    <option value="ALL">All Months</option>
-                    {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, idx) => (
-                      <option key={idx} value={idx}>{m}</option>
-                    ))}
-                  </select>
+                    <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white flex-1 sm:w-[130px]">
+                      <option value="ALL">All Months</option>
+                      {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, idx) => (
+                        <option key={idx} value={idx}>{m}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
-                <div className="relative w-[220px] shrink-0">
-                  <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search..." className="w-full text-xs py-2 pl-8 pr-3 rounded-lg border border-slate-300 bg-slate-50 outline-none font-medium shadow-inner" />
+                <div className="relative w-full sm:w-[220px]">
+                  <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search..." className="w-full text-xs py-2.5 sm:py-2 pl-8 pr-3 rounded-lg border border-slate-300 bg-slate-50 outline-none font-medium shadow-inner" />
                   <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 </div>
               </div>
 
-              {/* Row 2: All Firms, All F.Y., All Status (Left) | Delete & + ADD Button (Right) */}
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 shrink-0">
-                  <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} style={{ width: '160px' }} className="pro-input py-2 px-3 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
+              {/* SECONDARY TOOLBAR FOR FILTERS & ACTIONS */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+                  <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} className="pro-input py-2 px-3 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white w-full sm:w-[160px]">
                     <option value="All Firms">All Firms</option>
                     {firms.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
                   </select>
 
-                  <select value={filterFY} onChange={(e) => setFilterFY(e.target.value)} style={{ width: '130px' }} className="pro-input py-2 px-3 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
+                  <select value={filterFY} onChange={(e) => setFilterFY(e.target.value)} className="pro-input py-2 px-3 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white w-full sm:w-[130px]">
                     <option value="ALL">All F.Y.</option>
                     {availableFYs.map(fy => <option key={fy} value={fy}>{fy}</option>)}
                   </select>
 
-                  <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} style={{ width: '130px' }} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
+                  <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white col-span-2 sm:w-[130px]">
                     <option value="All Status">All Status</option>
                     <option value="New">🔵 New</option>
                     <option value="Pending">🔴 Pending</option>
@@ -1648,9 +1645,9 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                   </select>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2 justify-end">
                   {selectedCertIds.length > 0 && (
-                    <button onClick={handleDeleteSelected} className="bg-red-500 hover:bg-red-600 text-white font-black text-xs px-3 py-2 rounded-lg shadow-md transition-all uppercase tracking-wider shrink-0 cursor-pointer flex items-center gap-1">
+                    <button onClick={handleDeleteSelected} className="bg-red-500 hover:bg-red-600 text-white font-black text-xs px-3 py-2.5 sm:py-2 rounded-lg shadow-md transition-all uppercase tracking-wider shrink-0 cursor-pointer flex items-center gap-1">
                       <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                       Delete ({selectedCertIds.length})
                     </button>
@@ -1667,7 +1664,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                     setTableData({ hyTest: 'Pass', parts: 'COMPLETE', remark: 'OK', items: defaultItems });
                     setEditingCertId(null);
                     setViewMode('create');
-                  }} className="bg-[#00a67e] hover:bg-emerald-600 text-white font-black text-xs px-4 py-2 rounded-lg shadow-md transition-all flex items-center gap-1.5 uppercase active:scale-95 shrink-0 cursor-pointer">
+                  }} className="bg-[#00a67e] hover:bg-emerald-600 text-white font-black text-xs px-5 py-2.5 sm:py-2 rounded-lg shadow-md transition-all flex items-center justify-center gap-1.5 uppercase active:scale-95 shrink-0 cursor-pointer flex-1 sm:flex-none">
                     <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> <span>ADD</span>
                   </button>
                 </div>
@@ -1698,7 +1695,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                 </div>
             )}
 
-            {/* 🟢 DESKTOP TABLE VIEW */}
             <div className="hidden md:block overflow-x-auto custom-scrollbar">
               <table className="w-full text-left border-collapse min-w-[1000px]">
                 <thead>
@@ -1743,7 +1739,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                             {c.whatsappSent && (
                               <span className="inline-flex items-center bg-green-100 text-green-700 p-0.5 rounded" title="WhatsApp Sent">
                                 <svg className="w-3 h-3 fill-current text-green-600 shrink-0" viewBox="0 0 24 24">
-                                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                                  <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
                                 </svg>
                               </span>
                             )}
@@ -1825,7 +1821,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                 </tbody>
               </table>
 
-              {/* 🟢 Desktop Pagination Controls */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200">
                   <button 
@@ -1849,7 +1844,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
               )}
             </div>
 
-            {/* 🟢 MOBILE CARD VIEW */}
             <div className="block md:hidden p-3 space-y-3 bg-slate-50">
               <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
                 <label className="flex items-center gap-2.5 cursor-pointer text-xs font-black uppercase text-slate-700">
@@ -2013,7 +2007,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           </div>
         )}
 
-        {/* PAYMENT MODAL */}
         {isPaymentModalOpen && activeCert && (
           <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden">

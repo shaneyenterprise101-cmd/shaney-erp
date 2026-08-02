@@ -212,7 +212,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
   }, [initialViewMode]);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10; // 🟢 Set to 10 rows per page
+  const rowsPerPage = 10;
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
   // 🟢 REAL-TIME LIVE SYNC LISTENER (App.jsx broadcast catcher)
@@ -409,6 +409,30 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     }
   }, [formData.activeFirmId, editingQuoteId, viewMode, firms, products]);
 
+  // 🟢 Firm change hone par ya products load hone par items ke rates active firm ke mutabiq update karne ke liye
+  useEffect(() => {
+    if (viewMode === 'create' && products.length > 0) {
+      const firmGst = activeFirmObj.gstRate !== undefined ? Number(activeFirmObj.gstRate) : 18;
+      const updatedItems = items.map(it => {
+        let r = it.rate;
+        if (it.desc) {
+          const prod = products.find(p => p.description.toLowerCase() === it.desc.toLowerCase());
+          if (prod && prod.rates && prod.rates[formData.activeFirmId] !== undefined) {
+            r = parseFloat(prod.rates[formData.activeFirmId]) || 0;
+          }
+        }
+        const q = parseFloat(it.qty) || 0;
+        return { 
+          ...it, 
+          rate: r, 
+          gst: firmGst, 
+          amount: q * r 
+        };
+      });
+      setItems(updatedItems);
+    }
+  }, [formData.activeFirmId, products]);
+
   const getCustomerAddress = (partyName) => {
     const found = customers.find(c => c.name.toLowerCase() === partyName.toLowerCase());
     if (found) {
@@ -467,6 +491,8 @@ export default function Quotation({ selectedFY, initialViewMode }) {
               newItems[index].hsn = prod.hsn || newItems[index].hsn;
               if (prod.rates && prod.rates[formData.activeFirmId] !== undefined) {
                   newItems[index].rate = parseFloat(prod.rates[formData.activeFirmId]) || 0;
+              } else {
+                  newItems[index].rate = 0;
               }
           }
       }
@@ -485,7 +511,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     quoteTableColor: '#1e40af', quoteHeaderColor: '#1e40af', quoteBillingColor: '#1e40af'
   };
 
-  // 🟢 UPDATED WITH SQLITE IPC AND EXACT TIMESTAMP FOR DELTA SYNC
   const handleSaveQuotation = async (e, directAction = 'save') => {
     e.preventDefault();
     if (!formData.client || items.length === 0) {
@@ -514,7 +539,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     const autoFy = getFinancialYear(savedDate);
     
     let targetQuoteId = editingQuoteId || Date.now().toString();
-    const currentTimestamp = Date.now(); // 🟢 Exact Timestamp for Delta Sync
+    const currentTimestamp = Date.now();
     let quoteObj = null;
 
     if (editingQuoteId) {
@@ -530,7 +555,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
           vendor: activeFirmObj.name,
           staffName: formData.preparedBy,
           itemsData: JSON.stringify(items),
-          updatedAt: currentTimestamp // 🟢 Timestamp update
+          updatedAt: currentTimestamp
         });
         allHistory[idx] = quoteObj;
         logActionToBackend(`Updated Quotation Ref: ${formData.serialNo} for ${formData.client}`);
@@ -547,7 +572,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
         vendor: activeFirmObj.name,
         staffName: formData.preparedBy,
         itemsData: JSON.stringify(items),
-        updatedAt: currentTimestamp // 🟢 Timestamp created
+        updatedAt: currentTimestamp
       });
       allHistory.push(quoteObj);
       logActionToBackend(`Created Quotation Ref: ${formData.serialNo} for ${formData.client}`);
@@ -556,7 +581,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
     setQuotations(allHistory.filter(b => b.docType === 'quotation'));
 
-    // 🟢 Save directly to local SQLite Database via Electron IPC (0 latency)
     try {
       if (quoteObj) {
         await fetch(`${BACKEND_URL}/api/data`, {
@@ -661,7 +685,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     const idx = allHistory.findIndex(b => b.id.toString() === quote.id.toString());
     if (idx !== -1) {
       allHistory[idx].whatsappSent = true;
-      allHistory[idx].updatedAt = Date.now(); // 🟢 Timestamp update
+      allHistory[idx].updatedAt = Date.now();
       const targetRecord = allHistory[idx];
       localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
       setQuotations(allHistory.filter(b => b.docType === 'quotation'));
@@ -688,7 +712,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     const docLink = `${baseUrl}/preview/${quote.id}`;
     const msg = `Hello ${quote.party},\n\nPlease find attached your Quotation (Ref: ${quote.ref}).\n\n📄 View Document:\n🔗 ${docLink}\n\nThank you!\n- ${quote.vendor}`;
     
-    // 🟢 1 Second delay before opening WhatsApp as requested
     setTimeout(() => {
       window.open(`https://wa.me/${phone ? '91'+phone.replace(/\D/g,'') : ''}?text=${encodeURIComponent(msg)}`, '_blank');
     }, 1000);
@@ -810,7 +833,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activePreviewQuote, setActivePreviewQuote] = useState(null);
 
-  // 🟢 CLIENT-SIDE CACHING MECHANISM FOR QUOTATION VIEWER (0 Cloud Reads after 1st load)
   const handleViewQuote = async (e, q) => {
     e.stopPropagation();
     const localKey = `shaney_quotation_${q.id}`;
