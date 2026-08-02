@@ -31,6 +31,22 @@ const logActionToBackend = async (actionText) => {
   }
 };
 
+// 🟢 Rate Limiter Helper: Max 10 items per 1 second to maintain safe Read/Write performance
+const processInBatches = async (items, batchSize = 10, delayMs = 1000, asyncTaskCallback) => {
+  let results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchPromises = batch.map(item => asyncTaskCallback(item));
+    const batchResults = await Promise.all(batchPromises);
+    results.push(...batchResults);
+
+    if (i + batchSize < items.length) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  return results;
+};
+
 export default function Report({ selectedFY }) {
   const [firms, setFirms] = useState(() => {
     const saved = localStorage.getItem('ERP_Companies_v104');
@@ -260,7 +276,7 @@ export default function Report({ selectedFY }) {
     reader.readAsArrayBuffer(selectedFile);
   };
 
-  // 🟢 INDEPENDENT CUSTOMER SYNC & DATE-AWARE CERTIFICATE DUPLICATE CHECK WITH SQLITE IPC & AWS
+  // 🟢 THROTTLED CONFIRM MIRROR IMPORT (Max 10 files per second + Spinner)
   const confirmMirrorImport = async () => {
     setIsSyncing(true);
     try {
@@ -462,8 +478,8 @@ export default function Report({ selectedFY }) {
       localStorage.setItem('ERP_History_v104', JSON.stringify(history));
       localStorage.setItem('ERP_Customers_v104', JSON.stringify(customers));
 
-      // 🟢 Sync new items to cloud & local SQLite via IPC with timestamps
-      for (let hItem of newHistoryItems) {
+      // 🟢 Throttled Upload: Max 10 items per 1 second
+      await processInBatches(newHistoryItems, 10, 1000, async (hItem) => {
         await fetch(`${BACKEND_URL}/api/data`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -474,8 +490,9 @@ export default function Report({ selectedFY }) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', hItem);
         }
-      }
-      for (let cItem of newCustomerItems) {
+      });
+
+      await processInBatches(newCustomerItems, 10, 1000, async (cItem) => {
         await fetch(`${BACKEND_URL}/api/data`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -485,7 +502,7 @@ export default function Report({ selectedFY }) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', cItem);
         }
-      }
+      });
 
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'certificates' } }));
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'customers' } }));
@@ -573,14 +590,14 @@ export default function Report({ selectedFY }) {
     }
   };
 
-  // 🟢 TIMESTAMP OPTIMIZED FORCE UPLOAD WITH SQLITE IPC
+  // 🟢 THROTTLED FORCE UPLOAD (Max 10 files per second + Spinner)
   const handleCloudUpload = async () => {
     setIsSyncing(true);
     try {
       const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
       let uploadedCount = 0;
 
-      for (let item of history) {
+      await processInBatches(history, 10, 1000, async (item) => {
         if (!item.updatedAt) {
           item.updatedAt = Date.now();
         }
@@ -594,7 +611,7 @@ export default function Report({ selectedFY }) {
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', item);
         }
         uploadedCount++;
-      }
+      });
 
       setIsSyncing(false);
       logActionToBackend(`Force uploaded ${uploadedCount} local records to cloud`);
@@ -605,7 +622,7 @@ export default function Report({ selectedFY }) {
     }
   };
 
-  // 🟢 TIMESTAMP OPTIMIZED SYNC/DOWNLOAD WITH SQLITE IPC
+  // 🟢 THROTTLED SYNC/DOWNLOAD (Max 10 files per second + Spinner)
   const handleCloudDownload = async () => {
     setIsSyncing(true);
     try {
@@ -622,7 +639,7 @@ export default function Report({ selectedFY }) {
         let history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
         let newRecordsCount = 0;
 
-        cloudCerts.forEach(async (cloudData) => {
+        await processInBatches(cloudCerts, 10, 1000, async (cloudData) => {
           const index = history.findIndex(h => h.id === cloudData.id);
           if (index !== -1) {
             history[index] = cloudData; 
@@ -657,11 +674,12 @@ export default function Report({ selectedFY }) {
     <div className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
       <div className="max-w-7xl mx-auto pb-10">
       
+      {/* 🟢 GLOBAL LOADING SPINNER SCREEN */}
       {isSyncing && (
         <div className="fixed inset-0 bg-slate-950/70 z-[999999] flex flex-col items-center justify-center backdrop-blur-md">
           <div className="w-16 h-16 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <h2 className="text-white font-black text-lg uppercase tracking-widest">Checking & Syncing Data...</h2>
-          <p className="text-slate-300 text-xs font-bold mt-1">Filtering duplicates and updating cloud securely.</p>
+          <h2 className="text-white font-black text-lg uppercase tracking-widest">Processing (Max 10 files/sec)...</h2>
+          <p className="text-slate-300 text-xs font-bold mt-1">Please wait while maintaining safe Read/Write performance.</p>
         </div>
       )}
 

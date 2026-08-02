@@ -11,7 +11,6 @@ const getCurrentFY = () => {
   return m >= 4 ? `F.Y. ${y}-${String(y + 1).slice(-2)}` : `F.Y. ${y - 1}-${String(y).slice(-2)}`;
 };
 
-// 🟢 SMART FY EXTRACTOR: Ref ya Date se FY nikalne ke liye
 const getFinancialYear = (refStr, dateStr) => {
   if (refStr) {
     const match = String(refStr).match(/(\d{2})-(\d{2})/);
@@ -46,11 +45,10 @@ const getFinancialYear = (refStr, dateStr) => {
   }
 };
 
-// 🟢 BULLETPROOF DATA SANITIZER WITH TIMESTAMP FALLBACK
 const sanitizeForCloud = (dataObj) => {
   let cleaned = { ...dataObj };
   if (!cleaned.updatedAt) {
-    cleaned.updatedAt = Date.now(); // 🟢 Timestamp fallback
+    cleaned.updatedAt = Date.now();
   }
   if (!cleaned.fy || cleaned.fy === 'ALL' || typeof cleaned.fy === 'undefined') {
     cleaned.fy = getFinancialYear(cleaned.ref, cleaned.date || cleaned.validDate) || getCurrentFY();
@@ -72,7 +70,6 @@ const getDynamicPrefix = () => {
   return `SE/${yr1}-${yr2}/101`;
 };
 
-// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
 const logActionToBackend = async (actionText) => {
   try {
     const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
@@ -111,10 +108,9 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   }, [initialViewMode]);
 
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10; // 🟢 Updated to 10 rows per page
+  const rowsPerPage = 10;
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
-  // 🟢 REAL-TIME LIVE SYNC LISTENER (App.jsx broadcast catcher)
   useEffect(() => {
     const handleDataUpdate = (e) => {
       if (!e.detail || e.detail.type === 'certificates') {
@@ -185,6 +181,9 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const [selectedStatus, setSelectedStatus] = useState('All Status');
   const [filterFY, setFilterFY] = useState(selectedFY || 'ALL');
 
+  const [filterMonth, setFilterMonth] = useState('ALL');
+  const [filterYearNum, setFilterYearNum] = useState('ALL');
+
   useEffect(() => {
     if (selectedFY) {
       setFilterFY(selectedFY);
@@ -193,7 +192,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, selectedFirm, selectedStatus, filterFY]);
+  }, [searchTerm, selectedFirm, selectedStatus, filterFY, filterMonth, filterYearNum]);
 
   const [selectedCertIds, setSelectedCertIds] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: 'ref', direction: 'desc' });
@@ -281,6 +280,19 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   const availableFYs = Array.from(new Set(certificates.map(c => c.fy || getFinancialYear(c.ref, c.date) || getCurrentFY()).filter(Boolean))).sort().reverse();
   if (availableFYs.length === 0) availableFYs.push(getCurrentFY());
+
+  const availableYears = Array.from(new Set(certificates.map(c => {
+    const dStr = c.date || c.validDate;
+    if (!dStr) return null;
+    let clean = String(dStr).trim();
+    if (clean.includes('/')) clean = clean.replace(/\//g, '-');
+    if (clean.includes('-')) {
+      const parts = clean.split('-');
+      if (parts[0].length === 4) return parts[0];
+      if (parts[2] && parts[2].length === 4) return parts[2];
+    }
+    return null;
+  }).filter(Boolean))).sort().reverse();
 
   const [customers, setCustomers] = useState(() => {
     try {
@@ -410,7 +422,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const [isPreviewOpen, setIsPreviewOpen] = useState(false);
   const [activePreviewCert, setActivePreviewCert] = useState(null);
 
-  // 🟢 CLIENT-SIDE CACHING MECHANISM FOR VIEWER (0 AWS Reads after 1st load)
   const handleViewCertificate = async (e, cert) => {
     e.stopPropagation();
     const localKey = `shaney_certificate_${cert.id}`;
@@ -525,7 +536,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
     const waUrl = `https://wa.me/${phone ? '91'+phone.replace(/\D/g,'') : ''}?text=${encodeURIComponent(msg)}`;
     
-    // 🟢 1 Second delay before opening WhatsApp as requested
     setTimeout(() => {
       window.open(waUrl, '_blank');
     }, 1000);
@@ -981,7 +991,28 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     const rowFY = getFinancialYear(c.ref, c.date || c.validDate) || getCurrentFY();
     const matchesFY = filterFY === 'ALL' || rowFY === filterFY || rowFY.includes(filterFY);
 
-    return matchesSearch && matchesFirm && matchesStatus && matchesFY;
+    const dStr = c.date || c.validDate;
+    let rowMonth = '';
+    let rowYearNum = '';
+    if (dStr) {
+      let clean = String(dStr).trim();
+      if (clean.includes('/')) clean = clean.replace(/\//g, '-');
+      if (clean.includes('-')) {
+        const parts = clean.split('-');
+        if (parts[0].length === 4) {
+          rowYearNum = parts[0];
+          rowMonth = String(parseInt(parts[1], 10) - 1);
+        } else if (parts[2] && parts[2].length === 4) {
+          rowYearNum = parts[2];
+          rowMonth = String(parseInt(parts[1], 10) - 1);
+        }
+      }
+    }
+
+    const matchesMonth = filterMonth === 'ALL' || rowMonth === String(filterMonth);
+    const matchesYearNum = filterYearNum === 'ALL' || rowYearNum === String(filterYearNum);
+
+    return matchesSearch && matchesFirm && matchesStatus && matchesFY && matchesMonth && matchesYearNum;
   }).sort((a, b) => {
     let aVal = a[sortConfig.key] || '';
     let bVal = b[sortConfig.key] || '';
@@ -1503,64 +1534,90 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
         {viewMode === 'list' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            <div className="bg-white p-3 lg:p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row justify-between items-center gap-4 mb-4">
-              <div className="flex items-center gap-3 w-full xl:w-auto shrink-0 justify-between xl:justify-start border-b xl:border-b-0 border-slate-100 pb-3 xl:pb-0">
-                <h2 className="flex items-center gap-2 text-sm font-black uppercase text-slate-800 tracking-wider">
-                  CERTIFICATE
-                </h2>
-                <button 
-                  onClick={() => setShowSummary(prev => !prev)} 
-                  className="bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 p-1.5 px-3 rounded-lg font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center gap-1.5"
-                >
-                  <svg className="w-3.5 h-3.5 text-blue-600 inline-block shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg> SUMMARY
-                </button>
-              </div>
+            
+            {/* 🟢 EXACT TWO-ROW COMPACT FILTER BAR MATCHING USER DRAWING */}
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3 mb-4">
+              
+              {/* Row 1: Certificate Title, Summary Button, All Years, All Months (Left) | Search bar (Right) */}
+              <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-3 shrink-0">
+                  <h2 className="flex items-center gap-2 text-sm font-black uppercase text-slate-800 tracking-wider">
+                    CERTIFICATE
+                  </h2>
+                  <button 
+                    onClick={() => setShowSummary(prev => !prev)} 
+                    className="bg-blue-50 border border-blue-200 text-blue-600 hover:bg-blue-100 p-1.5 px-3 rounded-lg font-bold text-xs uppercase tracking-wider shadow-sm transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <svg className="w-3.5 h-3.5 text-blue-600 inline-block shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg> 
+                    SUMMARY
+                  </button>
 
-              <div className="flex items-center justify-between xl:justify-center w-full xl:w-auto gap-2 lg:gap-3 shrink-0">
-                <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} className="pro-input py-2 px-3 text-xs w-[32%] xl:w-36 shadow-sm font-bold text-slate-700 cursor-pointer bg-white">
-                  <option value="All Firms">All Firms</option>
-                  {firms.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
-                </select>
-                <select value={filterFY} onChange={(e) => setFilterFY(e.target.value)} className="pro-input py-2 px-3 text-xs w-[32%] xl:w-32 shadow-sm font-bold text-slate-700 cursor-pointer bg-white">
-                  <option value="ALL">All F.Y.</option>
-                  {availableFYs.map(fy => <option key={fy} value={fy}>{fy}</option>)}
-                </select>
-                <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} className="pro-input py-2 px-2 text-xs w-[32%] xl:w-36 shadow-sm font-bold text-slate-700 cursor-pointer bg-white">
-                  <option value="All Status">All Status</option>
-                  <option value="New">🔵 New</option>
-                  <option value="Pending">🔴 Pending</option>
-                  <option value="In-Work">🟡 In-Work</option>
-                  <option value="Completed">🟢 Completed</option>
-                </select>
-              </div>
+                  <select value={filterYearNum} onChange={(e) => setFilterYearNum(e.target.value)} style={{ width: '110px' }} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
+                    <option value="ALL">All Years</option>
+                    {availableYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
+                  </select>
 
-              <div className="flex items-center w-full xl:w-auto gap-2 lg:gap-3 shrink-0 justify-end">
-                <div className="relative w-full xl:w-48">
+                  <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} style={{ width: '130px' }} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
+                    <option value="ALL">All Months</option>
+                    {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, idx) => (
+                      <option key={idx} value={idx}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="relative w-[220px] shrink-0">
                   <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search..." className="w-full text-xs py-2 pl-8 pr-3 rounded-lg border border-slate-300 bg-slate-50 outline-none font-medium shadow-inner" />
                   <svg className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2 shrink-0" fill="none" stroke="currentColor" strokeWidth="2.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                 </div>
-                {selectedCertIds.length > 0 && (
-                  <button onClick={handleDeleteSelected} className="bg-red-500 hover:bg-red-600 text-white font-black text-xs px-3 py-2 rounded-lg shadow-md transition-all uppercase tracking-wider shrink-0 flex items-center gap-1">
-                    <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
-                    Delete ({selectedCertIds.length})
-                  </button>
-                )}
-
-                <button onClick={() => {
-                  const defaultItems = categories.reduce((acc, cat) => ({ ...acc, [cat]: [{ cap: "", qty: "" }] }), {});
-                  setFormData({
-                    activeFirmId: firms.length > 0 ? firms[0].id : '',
-                    client: '', address: '', serialNo: '', refillDate: getTodayISO(),
-                    validUpTo: add364DaysISO(getTodayISO()), submitBy: staffList[0] || '', confirmBy: staffList[0] || '',
-                    collectedBy: staffList[0] || '', amount: '', payMethod: paymentMethods[0] || 'CASH'
-                  });
-                  setTableData({ hyTest: 'Pass', parts: 'COMPLETE', remark: 'OK', items: defaultItems });
-                  setEditingCertId(null);
-                  setViewMode('create');
-                }} className="bg-[#00a67e] hover:bg-emerald-600 text-white font-black text-xs px-4 py-2 rounded-lg shadow-md transition-all flex items-center gap-1.5 uppercase active:scale-95 shrink-0">
-                  <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> <span className="hidden sm:inline">ADD</span>
-                </button>
               </div>
+
+              {/* Row 2: All Firms, All F.Y., All Status (Left) | Delete & + ADD Button (Right) */}
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 shrink-0">
+                  <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} style={{ width: '160px' }} className="pro-input py-2 px-3 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
+                    <option value="All Firms">All Firms</option>
+                    {firms.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                  </select>
+
+                  <select value={filterFY} onChange={(e) => setFilterFY(e.target.value)} style={{ width: '130px' }} className="pro-input py-2 px-3 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
+                    <option value="ALL">All F.Y.</option>
+                    {availableFYs.map(fy => <option key={fy} value={fy}>{fy}</option>)}
+                  </select>
+
+                  <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} style={{ width: '130px' }} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white shrink-0">
+                    <option value="All Status">All Status</option>
+                    <option value="New">🔵 New</option>
+                    <option value="Pending">🔴 Pending</option>
+                    <option value="In-Work">🟡 In-Work</option>
+                    <option value="Completed">🟢 Completed</option>
+                  </select>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  {selectedCertIds.length > 0 && (
+                    <button onClick={handleDeleteSelected} className="bg-red-500 hover:bg-red-600 text-white font-black text-xs px-3 py-2 rounded-lg shadow-md transition-all uppercase tracking-wider shrink-0 cursor-pointer flex items-center gap-1">
+                      <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
+                      Delete ({selectedCertIds.length})
+                    </button>
+                  )}
+
+                  <button onClick={() => {
+                    const defaultItems = categories.reduce((acc, cat) => ({ ...acc, [cat]: [{ cap: "", qty: "" }] }), {});
+                    setFormData({
+                      activeFirmId: firms.length > 0 ? firms[0].id : '',
+                      client: '', address: '', serialNo: '', refillDate: getTodayISO(),
+                      validUpTo: add364DaysISO(getTodayISO()), submitBy: staffList[0] || '', confirmBy: staffList[0] || '',
+                      collectedBy: staffList[0] || '', amount: '', payMethod: paymentMethods[0] || 'CASH'
+                    });
+                    setTableData({ hyTest: 'Pass', parts: 'COMPLETE', remark: 'OK', items: defaultItems });
+                    setEditingCertId(null);
+                    setViewMode('create');
+                  }} className="bg-[#00a67e] hover:bg-emerald-600 text-white font-black text-xs px-4 py-2 rounded-lg shadow-md transition-all flex items-center gap-1.5 uppercase active:scale-95 shrink-0 cursor-pointer">
+                    <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> <span>ADD</span>
+                  </button>
+                </div>
+              </div>
+
             </div>
 
             {showSummary && (

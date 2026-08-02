@@ -126,7 +126,7 @@ app.get('/api/logs', (req, res) => {
     }
 });
 
-// 4. Post New Office Live Log (Capped strictly to 50 logs)
+// 4. Post New Office Live Log (Strictly Capped to 50 logs in RAM)
 app.post('/api/logs', (req, res) => {
     try {
         const { action, staff } = req.body;

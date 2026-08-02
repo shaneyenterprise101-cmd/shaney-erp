@@ -22,15 +22,16 @@ export default function Dashboard({ currentUser, setActiveTab }) {
   const [districtData, setDistrictData] = useState([]);
   const [liveFeedLogs, setLiveFeedLogs] = useState([]);
   const [leaderboardData, setLeaderboardData] = useState([]);
+  const [currentMonthRevenue, setCurrentMonthRevenue] = useState(0);
 
-  // 🟢 State for District Click Taluka Modal Breakdown
+  // State for District Click Taluka Modal Breakdown
   const [modalDistrict, setModalDistrict] = useState(null);
   const [talukaBreakdown, setTalukaBreakdown] = useState([]);
 
-  // 🟢 State for Activity Box Click Timestamp Popup
+  // State for Activity Box Click Timestamp Popup
   const [selectedActivityInfo, setSelectedActivityInfo] = useState(null);
 
-  // 🟢 Dedicated State for Login Activity Card Dropdown Only
+  // Dedicated State for Login Activity Card Dropdown Only
   const role = localStorage.getItem("ERP_Active_Role") || currentUser?.role || "ADMIN";
   const loggedInName = role === "ADMIN" ? "Admin" : (currentUser?.name || (() => {
     try {
@@ -61,22 +62,16 @@ export default function Dashboard({ currentUser, setActiveTab }) {
     }
   });
 
-  // 🟢 HEARTBEAT & SESSION PRESENCE TRACKER VIA RENDER BACKEND / AWS DYNAMODB
+  // HEARTBEAT SENT DIRECTLY TO SERVER MEMORY (NO DYNAMODB WRITES)
   useEffect(() => {
     if (!loggedInName) return;
 
-    const sendCloudHeartbeat = async () => {
+    const sendServerHeartbeat = async () => {
       try {
-        const userKey = loggedInName.toLowerCase();
-        const payload = {
-          username: loggedInName.toUpperCase(),
-          lastActive: Date.now(),
-          updatedAt: Date.now()
-        };
-        await fetch(`${BACKEND_URL}/api/data`, {
+        await fetch(`${BACKEND_URL}/api/heartbeat`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'active_sessions', id: String(userKey), data: payload })
+          body: JSON.stringify({ username: loggedInName.toUpperCase() })
         });
       } catch (e) {
         try {
@@ -88,8 +83,8 @@ export default function Dashboard({ currentUser, setActiveTab }) {
       }
     };
 
-    sendCloudHeartbeat();
-    const interval = setInterval(sendCloudHeartbeat, 20000); // Optimized interval to save writes
+    sendServerHeartbeat();
+    const interval = setInterval(sendServerHeartbeat, 15000); 
     return () => clearInterval(interval);
   }, [loggedInName]);
 
@@ -132,7 +127,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         let crmData = JSON.parse(localStorage.getItem("ERP_CRM_v9") || "[]");
         const customersData = JSON.parse(localStorage.getItem("ERP_Customers_v104") || "[]");
         
-        // 🟢 Pull records from SQLite local database if available via Electron IPC
+        // Pull records from SQLite local database if available via Electron IPC
         if (window.require) {
           try {
             const { ipcRenderer } = window.require('electron');
@@ -149,58 +144,37 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         const storedStaff = JSON.parse(localStorage.getItem("ERP_Staff_Accounts_v1") || localStorage.getItem("ERP_Staff_Accounts_v104") || "[]");
         setStaffList(storedStaff);
 
+        // FETCH ACTIVE SESSIONS & LIVE LOGS DIRECTLY FROM SERVER MEMORY APIS (ZERO DB READS)
         let onlineMap = {};
         let logsFromCloud = [];
-        try {
-          const res = await fetch(`${BACKEND_URL}/api/data`);
-          if (res.ok) {
-            const allData = await res.json();
-            const nowTime = Date.now();
-            
-            // Extract active sessions
-            let activeSessionsList = [];
-            if (Array.isArray(allData)) {
-              activeSessionsList = allData.filter(item => item.docType === 'active_session' || item.username);
-            } else if (allData.active_sessions) {
-              activeSessionsList = allData.active_sessions;
-            }
-            activeSessionsList.forEach(data => {
-              if (data.username && (nowTime - (data.lastActive || 0) < 90000)) {
-                onlineMap[data.username.toLowerCase()] = true;
-              }
-            });
 
-            // Extract office logs
-            if (Array.isArray(allData)) {
-              logsFromCloud = allData.filter(item => item.action).slice(-30).reverse();
-            } else if (allData.office_logs) {
-              logsFromCloud = allData.office_logs.slice(0, 30);
-            }
+        try {
+          const sessionRes = await fetch(`${BACKEND_URL}/api/sessions`);
+          if (sessionRes.ok) {
+            onlineMap = await sessionRes.json();
           }
-        } catch (e) {
-          const activeSessions = JSON.parse(localStorage.getItem("ERP_Active_Sessions_Map") || "{}");
-          const now = Date.now();
-          storedStaff.forEach(st => {
-            const uId = String(st.name || st.userid || "").toLowerCase();
-            if ((now - (activeSessions[uId] || 0)) < 90000) {
-              onlineMap[uId] = true;
-            }
-          });
-          logsFromCloud = JSON.parse(localStorage.getItem("ERP_Office_Live_Logs") || "[]");
-        }
+        } catch (e) {}
+
+        try {
+          const logsRes = await fetch(`${BACKEND_URL}/api/logs`);
+          if (logsRes.ok) {
+            logsFromCloud = await logsRes.json();
+          }
+        } catch (e) {}
 
         const staffWithStatus = storedStaff.map(st => {
           const uId = String(st.name || st.userid || "").toLowerCase();
           return {
             ...st,
-            isOnline: !!onlineMap[uId]
+            isOnline: !!onlineMap[uId] || (role === 'ADMIN' && uId === 'admin')
           };
         });
 
         setStaffActivity(staffWithStatus);
-        setLiveFeedLogs(logsFromCloud);
+        setLiveFeedLogs(Array.isArray(logsFromCloud) ? logsFromCloud : []);
 
         let rev = 0;
+        let monthRev = 0;
         let certCount = 0;
         let overdueCount = 0;
         
@@ -265,7 +239,8 @@ export default function Dashboard({ currentUser, setActiveTab }) {
           if (b.date) {
             let dObj = parseIndianDate(b.date);
             if (dObj && !isNaN(dObj) && dObj.getMonth() === curMonth && dObj.getFullYear() === curYear) {
-              let confirmedBy = (b.staffName || b.staff || "ADMIN").toUpperCase().trim();
+              monthRev += tVal;
+              let confirmedBy = (b.confirmName || b.staffName || b.staff || "ADMIN").toUpperCase().trim();
               if (!staffSalesMap[confirmedBy]) {
                 staffSalesMap[confirmedBy] = { name: confirmedBy, totalSales: 0, count: 0 };
               }
@@ -291,6 +266,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
 
         let lbArr = Object.values(staffSalesMap).sort((a, b) => b.totalSales - a.totalSales);
         setLeaderboardData(lbArr);
+        setCurrentMonthRevenue(monthRev);
 
         let activeLeads = 0;
         if (Array.isArray(crmData)) {
@@ -523,10 +499,15 @@ export default function Dashboard({ currentUser, setActiveTab }) {
 
   }, [districtData]);
 
+  // Find logged in staff personal data from leaderboard
+  const staffPersonalData = role === 'STAFF' 
+    ? leaderboardData.find(s => s.name === loggedInName.toUpperCase()) || { name: loggedInName.toUpperCase(), totalSales: 0, count: 0 }
+    : null;
+
   return (
     <div className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
       <div className="max-w-7xl mx-auto pb-10">
-        {/* 👋 WELCOME BANNER */}
+        {/* WELCOME BANNER */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
           <div>
             <h1 className="text-2xl font-black text-slate-800 flex items-center gap-2">
@@ -534,7 +515,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
               Welcome back, <span className="text-indigo-600 uppercase">{loggedInName}</span>!
             </h1>
             <p className="text-[11px] font-bold text-slate-500 uppercase tracking-widest mt-1">
-              Here is your business summary today (All Time)
+              Here is your business summary today
             </p>
           </div>
 
@@ -551,14 +532,14 @@ export default function Dashboard({ currentUser, setActiveTab }) {
           </div>
         </div>
 
-        {/* 📈 TOP METRICS */}
+        {/* TOP METRICS */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="bg-gradient-to-br from-indigo-500 to-indigo-700 rounded-2xl p-5 text-white shadow-sm relative overflow-hidden">
             <div className="absolute -right-2 -top-2 text-white/20 text-6xl select-none">
               <svg className="w-16 h-16 text-white/20" fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
             </div>
-            <div className="text-[10px] font-black uppercase tracking-widest text-indigo-100 mb-1 relative z-10">Total Revenue</div>
-            <div className="text-2xl font-black relative z-10">{role === "STAFF" ? "₹ ***" : `₹ ${metrics.totalRevenue.toLocaleString('en-IN')}`}</div>
+            <div className="text-[10px] font-black uppercase tracking-widest text-indigo-100 mb-1 relative z-10">Current Month Revenue</div>
+            <div className="text-2xl font-black relative z-10">{role === "STAFF" ? `₹ ${staffPersonalData.totalSales.toLocaleString('en-IN')}` : `₹ ${currentMonthRevenue.toLocaleString('en-IN')}`}</div>
           </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm relative overflow-hidden hover:shadow-md transition-shadow">
             <div className="absolute -right-2 -top-2 text-slate-50 text-6xl select-none">
@@ -583,7 +564,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
           </div>
         </div>
 
-        {/* 🚀 3-COLUMN DASHBOARD GRID */}
+        {/* 3-COLUMN DASHBOARD GRID */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
           <div className="space-y-6">
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -708,7 +689,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
               </div>
             </div>
 
-            {/* 🏆 THIS MONTH'S CONFIRMED BY LEADERBOARD BOX */}
+            {/* THIS MONTH'S CONFIRMED BY LEADERBOARD BOX */}
             <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
               <div className="border-b border-slate-100 pb-3 mb-4 flex items-center gap-2">
                 <svg className="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/></svg>
@@ -720,20 +701,25 @@ export default function Dashboard({ currentUser, setActiveTab }) {
                     No sales recorded by staff this month.
                   </div>
                 ) : (
-                  leaderboardData.map((staff, idx) => (
-                    <div key={idx} className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-100 shadow-sm">
-                      <div className="flex items-center gap-2">
-                        <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 font-black text-[10px] flex items-center justify-center shrink-0">
-                          {idx + 1}
-                        </span>
-                        <span className="text-xs font-black text-slate-800 uppercase">{staff.name}</span>
+                  leaderboardData.map((staff, idx) => {
+                    const isCurrentStaff = role === 'STAFF' && staff.name === loggedInName.toUpperCase();
+                    return (
+                      <div key={idx} className={`flex items-center justify-between p-2.5 rounded-xl border shadow-sm ${isCurrentStaff ? 'bg-indigo-50 border-indigo-200 font-bold' : 'bg-slate-50 border-slate-100'}`}>
+                        <div className="flex items-center gap-2">
+                          <span className="w-5 h-5 rounded-full bg-amber-100 text-amber-700 font-black text-[10px] flex items-center justify-center shrink-0">
+                            {idx + 1}
+                          </span>
+                          <span className="text-xs font-black text-slate-800 uppercase">
+                            {staff.name} {isCurrentStaff && <span className="ml-1 text-[8px] bg-indigo-600 text-white px-1.5 py-0.5 rounded">You</span>}
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-xs font-black font-mono text-emerald-600">₹{staff.totalSales.toLocaleString('en-IN')}</div>
+                          <div className="text-[9px] font-bold text-slate-400">{staff.count} Certs</div>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <div className="text-xs font-black font-mono text-emerald-600">₹{staff.totalSales.toLocaleString('en-IN')}</div>
-                        <div className="text-[9px] font-bold text-slate-400">{staff.count} Certs</div>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>
@@ -775,7 +761,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
               <div style={{ width: '100%', height: '380px' }} id="gujaratMapContainer"></div>
             </div>
 
-            {/* ⏱️ REAL LOGIN ACTIVITY HEATMAP GRID */}
+            {/* REAL LOGIN ACTIVITY HEATMAP GRID */}
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
                 <div>
@@ -786,7 +772,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
                   <p className="text-[10px] text-slate-400 font-bold mt-0.5">Date-wise and exact hour-wise activity matrix (Click green box for timestamps)</p>
                 </div>
 
-                {/* 🟢 INDEPENDENT STAFF SELECT DROPDOWN FOR LOGIN ACTIVITY ONLY */}
+                {/* INDEPENDENT STAFF SELECT DROPDOWN FOR LOGIN ACTIVITY ONLY */}
                 <div className="bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 flex items-center gap-2">
                   <div className="relative flex items-center">
                     <select 
@@ -901,7 +887,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
           </div>
         </div>
 
-        {/* 🟢 TIMESTAMP POPUP MODAL WHEN CLICKING GREEN BOX */}
+        {/* TIMESTAMP POPUP MODAL WHEN CLICKING GREEN BOX */}
         {selectedActivityInfo && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-in-out]">
             <div className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden border border-slate-200">
@@ -952,7 +938,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
           </div>
         )}
 
-        {/* 🟢 TALUKA BREAKDOWN MODAL POPUP ON DISTRICT CLICK */}
+        {/* TALUKA BREAKDOWN MODAL POPUP ON DISTRICT CLICK */}
         {modalDistrict && (
           <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-[99999] flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-in-out]">
             <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden border border-slate-200">
