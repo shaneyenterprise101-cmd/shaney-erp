@@ -3,35 +3,8 @@ import * as XLSX from 'xlsx';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
-// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
-const logActionToBackend = async (actionText) => {
-  try {
-    const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
-    let activeName = "Admin";
-    
-    if (role === "ADMIN") {
-      activeName = "Admin";
-    } else {
-      try {
-        const activeUser = JSON.parse(localStorage.getItem("ERP_Active_Staff_Data") || "{}");
-        activeName = activeUser?.name || "Staff";
-      } catch (e) {
-        activeName = "Staff";
-      }
-    }
-
-    const formattedAction = `${activeName.toUpperCase()}: ${actionText}`;
-    await fetch(`${BACKEND_URL}/api/logs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: formattedAction })
-    });
-  } catch (e) {
-    console.error("Log push error:", e);
-  }
-};
-
 export default function Customer() {
+  // 🟢 1. LOCAL-FIRST INITIALIZATION (Zero wait, instant load)
   const [customers, setCustomers] = useState(() => {
     try {
       const saved = localStorage.getItem('ERP_Customers_v104');
@@ -40,12 +13,14 @@ export default function Customer() {
     } catch(e) { return []; }
   });
 
-  // 🟢 REAL-TIME LIVE SYNC LISTENER (App.jsx broadcast catcher)
+  // 🟢 2. CONTROLLED BACKGROUND SYNC (Reduces heavy reads & handles multi-device changes)
   useEffect(() => {
-    const fetchCustomersFromCloud = async () => {
+    let isMounted = true;
+
+    const syncWithCloud = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/data`);
-        if (res.ok) {
+        if (res.ok && isMounted) {
           const allData = await res.json();
           if (allData && typeof allData === 'object') {
             let cloudCust = [];
@@ -59,18 +34,29 @@ export default function Customer() {
                 if (parsed.customers) cloudCust = parsed.customers;
               } catch(e){}
             }
+
             if (cloudCust.length > 0) {
               cloudCust = cloudCust.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-              setCustomers(cloudCust);
-              localStorage.setItem('ERP_Customers_v104', JSON.stringify(cloudCust));
+              
+              // Compare with local storage to avoid unnecessary state re-renders if data is same
+              const localSaved = localStorage.getItem('ERP_Customers_v104');
+              const localParsed = localSaved ? JSON.parse(localSaved) : [];
+              
+              // Simple length or latest update check to ensure multi-device sync
+              if (JSON.stringify(cloudCust) !== JSON.stringify(localParsed)) {
+                setCustomers(cloudCust);
+                localStorage.setItem('ERP_Customers_v104', JSON.stringify(cloudCust));
+              }
             }
           }
         }
       } catch (err) {
-        console.error("Error fetching customers from AWS backend:", err);
+        console.error("Cloud sync background check error:", err);
       }
     };
-    fetchCustomersFromCloud();
+
+    // Run background sync once per mount to check if other devices made changes
+    syncWithCloud();
 
     const handleDataUpdate = (e) => {
       if (!e.detail || e.detail.type === 'customers') {
@@ -83,7 +69,11 @@ export default function Customer() {
       }
     };
     window.addEventListener('ERP_DATA_UPDATED', handleDataUpdate);
-    return () => window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
+    
+    return () => {
+      isMounted = false;
+      window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
+    };
   }, []);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -92,7 +82,7 @@ export default function Customer() {
   
   // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10; // 🟢 Set to 10 rows per page as requested
+  const rowsPerPage = 10;
 
   // Mobile Floating Search State
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
@@ -108,6 +98,7 @@ export default function Customer() {
     contacts: [{ person: '', mobile: '', type: 'Mobile', sameAsWhatsapp: true, whatsapp: '' }]
   });
 
+  // Keep LocalStorage updated automatically when state changes locally
   useEffect(() => {
     localStorage.setItem('ERP_Customers_v104', JSON.stringify(customers));
   }, [customers]);
@@ -145,7 +136,7 @@ export default function Customer() {
     setFormData({ ...formData, contacts: newContacts });
   };
 
-  // 🟢 GRANULAR SAVE TO AWS DYNAMODB, SQLITE & LOCALSTORAGE WITH TIMESTAMP
+  // 🟢 3. OPTIMIZED SUBMIT (Instant local update, single cloud write, no extra log writes)
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name) {
@@ -159,7 +150,7 @@ export default function Customer() {
       id: customerId, 
       docType: 'customer',
       ...formData, 
-      updatedAt: currentTimestamp // 🟢 Exact Timestamp for Delta Sync
+      updatedAt: currentTimestamp
     };
 
     let updatedList = [];
@@ -170,10 +161,11 @@ export default function Customer() {
       updatedList = [...customers, customerPayload];
     }
 
+    // Instant local state & storage update (Zero latency for UI)
     setCustomers(updatedList);
     localStorage.setItem('ERP_Customers_v104', JSON.stringify(updatedList));
 
-    // AWS & SQLite sync
+    // Optimized background cloud sync (1 write request instead of multiple)
     try {
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
@@ -184,7 +176,6 @@ export default function Customer() {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', customerPayload);
       }
-      logActionToBackend(`Saved/Updated Customer: ${customerPayload.name}`);
     } catch (err) {
       console.error("❌ Cloud Sync error:", err);
     }
@@ -199,7 +190,7 @@ export default function Customer() {
       pincode: '',
       contacts: [{ person: '', mobile: '', type: 'Mobile', sameAsWhatsapp: true, whatsapp: '' }]
     });
-    alert('✅ Customer Saved Successfully to Directory & Cloud!');
+    alert('✅ Customer Saved Successfully!');
   };
 
   const handleEditClick = (customer) => {
@@ -239,7 +230,10 @@ export default function Customer() {
       if (confirm(`Are you sure you want to delete ${selectedIds.length} selected customer(s)?`)) {
         const updated = customers.filter(c => !selectedIds.includes(c.id));
         setCustomers(updated);
-        
+        localStorage.setItem('ERP_Customers_v104', JSON.stringify(updated));
+        setSelectedIds([]);
+
+        // Batch or loop delete requests cleanly
         for (let id of selectedIds) {
           try { 
             await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
@@ -249,17 +243,12 @@ export default function Customer() {
             }
           } catch(e){}
         }
-
-        setSelectedIds([]);
-        localStorage.setItem('ERP_Customers_v104', JSON.stringify(updated));
-        logActionToBackend(`Deleted multiple customers from directory`);
       }
     } else {
       if (confirm('Are you sure you want to delete ALL client records?')) {
         setCustomers([]);
         setSelectedIds([]);
         localStorage.removeItem('ERP_Customers_v104');
-        logActionToBackend(`Deleted ALL customer directory records`);
       }
     }
   };
@@ -281,7 +270,6 @@ export default function Customer() {
       } catch (err) {
         console.error("Cloud delete error:", err);
       }
-      logActionToBackend(`Deleted single customer record ID: ${id}`);
     }
   };
 
@@ -571,7 +559,7 @@ export default function Customer() {
               </div>
             </div>
 
-            {/* 🟢 DESKTOP TABLE VIEW (Visible on md and above) */}
+            {/* 🟢 DESKTOP TABLE VIEW */}
             <div className="hidden md:block overflow-x-auto flex-1">
               <table className="w-full text-left border-collapse">
                 <thead>

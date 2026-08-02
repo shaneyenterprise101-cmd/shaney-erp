@@ -70,33 +70,6 @@ const getDynamicPrefix = () => {
   return `SE/${yr1}-${yr2}/101`;
 };
 
-const logActionToBackend = async (actionText) => {
-  try {
-    const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
-    let activeName = "Admin";
-    
-    if (role === "ADMIN") {
-      activeName = "Admin";
-    } else {
-      try {
-        const activeUser = JSON.parse(localStorage.getItem("ERP_Active_Staff_Data") || "{}");
-        activeName = activeUser?.name || "Staff";
-      } catch (e) {
-        activeName = "Staff";
-      }
-    }
-
-    const formattedAction = `${activeName.toUpperCase()}: ${actionText}`;
-    await fetch(`${BACKEND_URL}/api/logs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: formattedAction })
-    });
-  } catch (e) {
-    console.error("Log push error:", e);
-  }
-};
-
 export default function Certificate({ selectedFY, initialViewMode }) {
   const [viewMode, setViewMode] = useState(initialViewMode || 'list'); 
   const [showSummary, setShowSummary] = useState(false);
@@ -111,7 +84,61 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const rowsPerPage = 10;
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
+  // 🟢 LOCAL-FIRST INITIALIZATION (Zero wait, instant load)[cite: 12]
+  const [certificates, setCertificates] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ERP_History_v104');
+      let allHistory = saved ? JSON.parse(saved) : [];
+      allHistory = allHistory.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
+      return allHistory.filter(b => b.docType === 'certificate');
+    } catch(e) { return []; }
+  });
+
+  // 🟢 CONTROLLED BACKGROUND SYNC (Reduces heavy reads & handles multi-device changes)[cite: 12]
   useEffect(() => {
+    let isMounted = true;
+
+    const syncWithCloud = async () => {
+      try {
+        const res = await fetch(`${BACKEND_URL}/api/data`);
+        if (res.ok && isMounted) {
+          const allData = await res.json();
+          if (allData && typeof allData === 'object') {
+            let cloudCerts = [];
+            if (Array.isArray(allData)) {
+              cloudCerts = allData.filter(item => item.docType === 'certificate');
+            } else if (allData.certificates && Array.isArray(allData.certificates)) {
+              cloudCerts = allData.certificates;
+            } else if (allData.payload) {
+              try {
+                const parsed = JSON.parse(allData.payload);
+                if (parsed.certificates) cloudCerts = parsed.certificates;
+              } catch(e){}
+            }
+
+            if (cloudCerts.length > 0) {
+              cloudCerts = cloudCerts.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
+              
+              const localSaved = localStorage.getItem('ERP_History_v104');
+              const localParsed = localSaved ? JSON.parse(localSaved) : [];
+              
+              const currentCertsOnly = localParsed.filter(b => b.docType === 'certificate');
+              if (JSON.stringify(cloudCerts) !== JSON.stringify(currentCertsOnly)) {
+                const others = localParsed.filter(b => b.docType !== 'certificate');
+                const mergedHistory = [...others, ...cloudCerts];
+                setCertificates(cloudCerts);
+                localStorage.setItem('ERP_History_v104', JSON.stringify(mergedHistory));
+              }
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Cloud sync background check error:", err);
+      }
+    };
+
+    syncWithCloud();
+
     const handleDataUpdate = (e) => {
       if (!e.detail || e.detail.type === 'certificates') {
         const saved = localStorage.getItem('ERP_History_v104');
@@ -123,7 +150,10 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       }
     };
     window.addEventListener('ERP_DATA_UPDATED', handleDataUpdate);
-    return () => window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
+    return () => {
+      isMounted = false;
+      window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
+    };
   }, []);
 
   useEffect(() => {
@@ -238,12 +268,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const [capacities, setCapacities] = useState(() => {
     const saved = localStorage.getItem('ERP_CertCapacities_v104');
     return saved ? JSON.parse(saved) : ["1Kg", "2Kg", "4.5Kg", "6Kg", "9 Ltr Stored PressureType", "50 Ltr", "6 Cubic Meter", "7 Cubic Meter"];
-  });
-
-  const [certificates, setCertificates] = useState(() => {
-    let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-    allHistory = allHistory.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-    return allHistory.filter(b => b.docType === 'certificate');
   });
 
   useEffect(() => {
@@ -517,7 +541,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       } catch (err) {
         console.error("AWS whatsapp sent update error:", err);
       }
-      logActionToBackend(`Sent Certificate WhatsApp to ${cert.party} (Ref: ${cert.ref})`);
     }
 
     const cData = customers.find(c => c.name.toLowerCase() === cert.party.toLowerCase());
@@ -529,7 +552,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     if (type === 'payment') {
       const outAmt = getOutstanding(cert);
       msg = `Hello ${cert.party},\n\nYour payment of ₹${outAmt} is pending for Certificate (Ref: ${cert.ref}).\nKindly clear the dues at the earliest.\n\n📄 View your document here:\n🔗 ${docLink}\n\nThank you!\n- ${cert.vendor}`;
-      logActionToBackend(`Sent Payment Due Reminder WhatsApp of ₹${outAmt} to ${cert.party} (Ref: ${cert.ref})`);
     } else {
       msg = `Hello ${cert.party},\n\nYour Fire Safety Certificate (Ref: ${cert.ref}) has been generated successfully.\n\n📄 You can view, download as PDF, or print your certificate directly from this link:\n🔗 ${docLink}\n\nThank you!\n- ${cert.vendor}`;
     }
@@ -685,8 +707,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       } catch (err) {
         console.error("AWS delete certificate error:", err);
       }
-
-      logActionToBackend(`Deleted Certificate Record`);
     }
   };
 
@@ -726,7 +746,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       }
 
       setSelectedCertIds([]);
-      logActionToBackend(`Deleted multiple certificates`);
     }
   };
 
@@ -754,7 +773,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       } catch (err) {
         console.error("AWS work status update error:", err);
       }
-      logActionToBackend(`Updated status of ${allHistory[idx].ref} to ${newStatus}`);
     }
   };
 
@@ -864,7 +882,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           updatedAt: currentTimestamp
         });
         allHistory[idx] = recordPayload;
-        logActionToBackend(`Updated Certificate Ref: ${formData.serialNo} for ${formData.client}`);
       }
     } else {
       targetCertId = Date.now().toString();
@@ -890,7 +907,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         updatedAt: currentTimestamp
       });
       allHistory.push(recordPayload);
-      logActionToBackend(`Created Certificate Ref: ${formData.serialNo} for ${formData.client}`);
     }
 
     localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
@@ -983,7 +999,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         console.error("AWS payment add error:", err);
       }
 
-      logActionToBackend(`Added Payment of ₹${paymentForm.amount} for ${activeCert.ref}`);
       alert('✅ Payment Added & Updated!');
     }
   };
@@ -1022,7 +1037,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           console.error("AWS payment delete error:", err);
         }
 
-        logActionToBackend(`Deleted payment entry for ${activeCert.ref}`);
         alert('🗑️ Payment Receipt Deleted & Credit Updated!');
       }
     }
@@ -1325,7 +1339,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                 </button>
                 <div className="flex gap-2 w-full sm:w-auto">
                   <button onClick={(e) => handleWhatsAppSend(e, activePreviewCert, 'doc')} className="flex-1 sm:flex-none bg-[#25D366] text-white hover:bg-green-600 px-5 py-2.5 rounded-lg text-xs font-black uppercase transition-all shadow-md flex items-center justify-center gap-2">
-                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                     WhatsApp
                   </button>
                   <button onClick={() => {
@@ -1586,9 +1600,10 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         {viewMode === 'list' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             
+            {/* 🟢 UPDATED RESPONSIVE TOOLBAR (1st row jaisi same width ke sath) */}
             <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3 mb-4">
               
-              {/* TOP MOBILE RESPONSIVE TOOLBAR */}
+              {/* ROW 1: Title, Summary, Years, Months, Search */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <h2 className="flex items-center gap-2 text-sm font-black uppercase text-slate-800 tracking-wider">
@@ -1602,13 +1617,13 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                     SUMMARY
                   </button>
 
-                  <div className="flex items-center gap-2 w-full sm:w-auto">
-                    <select value={filterYearNum} onChange={(e) => setFilterYearNum(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white flex-1 sm:w-[110px]">
+                  <div className="grid grid-cols-2 gap-2 w-full sm:w-auto">
+                    <select value={filterYearNum} onChange={(e) => setFilterYearNum(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:w-[130px]">
                       <option value="ALL">All Years</option>
                       {availableYears.map(yr => <option key={yr} value={yr}>{yr}</option>)}
                     </select>
 
-                    <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white flex-1 sm:w-[130px]">
+                    <select value={filterMonth} onChange={(e) => setFilterMonth(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:w-[145px]">
                       <option value="ALL">All Months</option>
                       {['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'].map((m, idx) => (
                         <option key={idx} value={idx}>{m}</option>
@@ -1623,29 +1638,27 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                 </div>
               </div>
 
-              {/* SECONDARY TOOLBAR FOR FILTERS & ACTIONS */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
-                  <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} className="pro-input py-2 px-3 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white w-full sm:w-[160px]">
-                    <option value="All Firms">All Firms</option>
-                    {firms.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
-                  </select>
+              {/* ROW 2: Balanced Dropdowns (1st row matching) & Action Buttons */}
+              <div className="grid grid-cols-1 sm:flex sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
+                <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:flex-1 sm:max-w-[32%]">
+                  <option value="All Firms">All Firms</option>
+                  {firms.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
+                </select>
 
-                  <select value={filterFY} onChange={(e) => setFilterFY(e.target.value)} className="pro-input py-2 px-3 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white w-full sm:w-[130px]">
-                    <option value="ALL">All F.Y.</option>
-                    {availableFYs.map(fy => <option key={fy} value={fy}>{fy}</option>)}
-                  </select>
+                <select value={filterFY} onChange={(e) => setFilterFY(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:flex-1 sm:max-w-[32%]">
+                  <option value="ALL">All F.Y.</option>
+                  {availableFYs.map(fy => <option key={fy} value={fy}>{fy}</option>)}
+                </select>
 
-                  <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white col-span-2 sm:w-[130px]">
-                    <option value="All Status">All Status</option>
-                    <option value="New">🔵 New</option>
-                    <option value="Pending">🔴 Pending</option>
-                    <option value="In-Work">🟡 In-Work</option>
-                    <option value="Completed">🟢 Completed</option>
-                  </select>
-                </div>
+                <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:flex-1 sm:max-w-[24%]">
+                  <option value="All Status">All Status</option>
+                  <option value="New">🔵 New</option>
+                  <option value="Pending">🔴 Pending</option>
+                  <option value="In-Work">🟡 In-Work</option>
+                  <option value="Completed">🟢 Completed</option>
+                </select>
 
-                <div className="flex items-center gap-2 justify-end">
+                <div className="flex items-center gap-2 justify-end mt-1 sm:mt-0 sm:w-auto">
                   {selectedCertIds.length > 0 && (
                     <button onClick={handleDeleteSelected} className="bg-red-500 hover:bg-red-600 text-white font-black text-xs px-3 py-2.5 sm:py-2 rounded-lg shadow-md transition-all uppercase tracking-wider shrink-0 cursor-pointer flex items-center gap-1">
                       <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
@@ -1664,7 +1677,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                     setTableData({ hyTest: 'Pass', parts: 'COMPLETE', remark: 'OK', items: defaultItems });
                     setEditingCertId(null);
                     setViewMode('create');
-                  }} className="bg-[#00a67e] hover:bg-emerald-600 text-white font-black text-xs px-5 py-2.5 sm:py-2 rounded-lg shadow-md transition-all flex items-center justify-center gap-1.5 uppercase active:scale-95 shrink-0 cursor-pointer flex-1 sm:flex-none">
+                  }} className="bg-[#00a67e] hover:bg-emerald-600 text-white font-black text-xs px-5 py-2.5 sm:py-2 rounded-lg shadow-md transition-all flex items-center justify-center gap-1.5 uppercase active:scale-95 shrink-0 cursor-pointer">
                     <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg> <span>ADD</span>
                   </button>
                 </div>
@@ -1793,7 +1806,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                               </button>
                             )}
                             <button onClick={(e) => handleViewCertificate(e, c)} className="flex items-center gap-1 text-slate-600 hover:text-blue-600 bg-white hover:bg-blue-50 border border-slate-200 px-2 py-1.5 rounded transition-colors shadow-sm font-bold" title="View">
-                              <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3 z"/></svg>
+                              <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
                               VIEW
                             </button>
                             <button onClick={(e) => handleEditCertificate(e, c)} className="flex items-center gap-1 text-slate-600 hover:text-orange-600 bg-white hover:bg-orange-50 border border-slate-200 px-2 py-1.5 rounded transition-colors shadow-sm font-bold" title="Edit">
@@ -1802,7 +1815,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                             </button>
                             <button onClick={(e) => handleWhatsAppSend(e, c, 'doc')} className="flex items-center gap-1 bg-[#25D366] hover:bg-green-600 text-white px-2 py-1.5 rounded transition-colors shadow-sm font-bold text-[10px]" title="Send WhatsApp">
                               <svg className="w-3.5 h-3.5 fill-current shrink-0" viewBox="0 0 24 24">
-                                <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
+                                <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/>
                               </svg>
                               WA
                             </button>
@@ -2099,7 +2112,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
               </div>
               
               <div className="p-3 bg-white border-t border-slate-200 flex justify-end shrink-0">
-                <button onClick={(e) => { e.stopPropagation(); setIsPaymentModalOpen(false); }} className="bg-slate-800 hover:bg-slate-900 text-white px-6 py-2 rounded-lg font-black text-xs uppercase tracking-widest shadow-md transition-all">Close</button>
+                <button onClick={(e) => { e.stopPropagation(); setIsPaymentModalOpen(false); }} className="bg-slate-800 hover:bg-slate-900 text-white px-6 py-2 rounded-lg font-black text-xs uppercase tracking-widest transition-all">Close</button>
               </div>
             </div>
           </div>
