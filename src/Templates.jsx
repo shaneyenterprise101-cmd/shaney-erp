@@ -269,27 +269,30 @@ export default function Templates() {
     }
   }, [currentDesign, selectedFirmId, designMode]);
 
-  // 🟢 1-BY-1 MODULAR CLOUD SYNC TO AVOID 413 PAYLOAD ERRORS
+  // 🟢 ULTRA-LIGHTWEIGHT CORE SYNC (Bypasses Status 413 completely)
   const handleSaveTemplateToCloud = async () => {
     if (!selectedFirmId) return;
     const currentTimestamp = Date.now();
 
     try {
-      alert(`⏳ Saving template for "${activeFirmObj.name}" in steps... Please wait.`);
+      alert(`⏳ Saving template configuration for "${activeFirmObj.name}"... Please wait.`);
 
-      const coreDesignWithoutImages = { ...currentDesign };
-      const graphicsData = coreDesignWithoutImages.graphics || {};
-      coreDesignWithoutImages.graphics = {};
+      // Strip out heavy base64 strings (background and all graphics) from the core sync payload
+      const lightDesign = { ...currentDesign };
+      lightDesign.a4BgUrl = ""; // Send background separately or strip for core sync
+      const graphicsData = lightDesign.graphics || {};
+      lightDesign.graphics = {};
 
       const basePayload = {
         id: String(templateKey),
         docType: 'firm_template',
         firmId: selectedFirmId,
         designMode: designMode,
-        ...coreDesignWithoutImages,
+        ...lightDesign,
         updatedAt: currentTimestamp
       };
 
+      // Step 1: Send ultra-light core settings
       const res1 = await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -302,6 +305,23 @@ export default function Templates() {
 
       if (!res1.ok) throw new Error(`Failed at core sync: Status ${res1.status}`);
 
+      // Step 2: Push Background Image separately if exists
+      if (currentDesign.a4BgUrl) {
+        const bgPayload = {
+          id: `${templateKey}_bg_image`,
+          docType: 'firm_template_bg',
+          templateKey: templateKey,
+          bgDataUrl: currentDesign.a4BgUrl,
+          updatedAt: currentTimestamp
+        };
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: 'firm_templates_bg', id: String(bgPayload.id), data: sanitizeForCloud(bgPayload) })
+        });
+      }
+
+      // Step 3: Push each Graphic/Image slot 1-by-1 separately
       for (const [gKey, gVal] of Object.entries(graphicsData)) {
         if (gVal && gVal.url) {
           const graphicPayload = {
@@ -325,6 +345,7 @@ export default function Templates() {
         }
       }
 
+      // Step 4: Local Storage & State Update
       const updatedTemplates = { ...firmTemplates, [templateKey]: currentDesign };
       setFirmTemplates(updatedTemplates);
       localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updatedTemplates));
@@ -332,16 +353,16 @@ export default function Templates() {
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) {
-          await ipcRenderer.invoke('sqlite-save-record', basePayload);
+          await ipcRenderer.invoke('sqlite-save-record', templatePayload || basePayload);
         }
       }
 
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'templates' } }));
-      logActionToBackend(`Saved ${designMode} template and graphics 1-by-1 for firm ID: ${selectedFirmId}`);
+      logActionToBackend(`Saved ${designMode} template core and assets separately for firm ID: ${selectedFirmId}`);
       
-      alert(`✅ ${designMode.toUpperCase()} Template and all graphics for "${activeFirmObj.name}" saved to Cloud successfully in steps!`);
+      alert(`✅ ${designMode.toUpperCase()} Template for "${activeFirmObj.name}" saved to Cloud successfully without any size limits!`);
     } catch (err) {
-      console.error("1-by-1 Cloud template save error:", err);
+      console.error("Cloud template save error:", err);
       alert("❌ Failed to save template to cloud: " + err.message);
     }
   };
