@@ -5,7 +5,10 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand } from "@aw
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+
+// 🟢 Increased body payload limit to 50MB to completely eliminate Status 413 errors
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Initialize AWS DynamoDB Client
 const ddbClient = new DynamoDBClient({
@@ -216,9 +219,9 @@ app.post('/api/data', async (req, res) => {
 });
 
 // 7. Delete Record from DynamoDB (Matches Frontend DELETE Requests)
-app.delete('/api/data/:id', async (req, res) => {
+app.delete('/api/data/:id', async (updatedReq, res) => {
     try {
-        const targetId = req.params.id;
+        const targetId = updatedReq.params.id;
         const scanResult = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
         let deleted = false;
 
