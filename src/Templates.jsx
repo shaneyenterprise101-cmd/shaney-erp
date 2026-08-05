@@ -4,7 +4,6 @@ import { toJpeg } from 'html-to-image';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
-// 🟢 BULLETPROOF DATA SANITIZER WITH TIMESTAMP FALLBACK
 const sanitizeForCloud = (dataObj) => {
   let cleaned = { ...dataObj };
   if (!cleaned.updatedAt) {
@@ -18,7 +17,6 @@ const sanitizeForCloud = (dataObj) => {
   return cleaned;
 };
 
-// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
 const logActionToBackend = async (actionText) => {
   try {
     const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
@@ -48,11 +46,8 @@ const logActionToBackend = async (actionText) => {
 
 export default function Templates() {
   const [designMode, setDesignMode] = useState('quotation');
-
-  // 🟢 Mobile Drawer / Modal Preview State for Templates
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
-  // Load Companies from Settings / Local-First
   const [firms, setFirms] = useState(() => {
     try {
       const saved = localStorage.getItem('ERP_Companies_v104');
@@ -64,7 +59,6 @@ export default function Templates() {
     }
   });
 
-  // Firm-Wise Templates Database State using version 104 (Local First)
   const [firmTemplates, setFirmTemplates] = useState(() => {
     try {
       const saved = localStorage.getItem('ERP_FirmTemplates_v104');
@@ -74,19 +68,14 @@ export default function Templates() {
     }
   });
 
-  // 🟢 REAL-TIME LIVE SYNC LISTENER (App.jsx broadcast catcher)
   useEffect(() => {
     const handleDataUpdate = (e) => {
       if (!e.detail || e.detail.type === 'templates' || e.detail.type === 'settings') {
         try {
           const savedFirms = localStorage.getItem('ERP_Companies_v104');
-          if (savedFirms) {
-            setFirms(JSON.parse(savedFirms));
-          }
+          if (savedFirms) setFirms(JSON.parse(savedFirms));
           const savedTemplates = localStorage.getItem('ERP_FirmTemplates_v104');
-          if (savedTemplates) {
-            setFirmTemplates(JSON.parse(savedTemplates));
-          }
+          if (savedTemplates) setFirmTemplates(JSON.parse(savedTemplates));
         } catch(err) {
           console.error("Template sync storage parse error:", err);
         }
@@ -96,7 +85,7 @@ export default function Templates() {
     return () => window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
   }, []);
 
-  // 🟢 Fetch templates from Cloud on load (Cloud-Download to Local Cache)
+  // 🟢 FIXED CLOUD TEMPLATES PARSING (Handles Arrays & Objects correctly)
   useEffect(() => {
     const fetchCloudTemplates = async () => {
       try {
@@ -108,17 +97,27 @@ export default function Templates() {
             let cloudFirms = [];
 
             if (Array.isArray(allData)) {
-              allData.filter(item => item.docType === 'firm_template').forEach(t => {
-                cloudTemplates[t.id] = t;
+              allData.filter(item => item && item.docType === 'firm_template').forEach(t => {
+                if (t.id) cloudTemplates[t.id] = t;
               });
-              cloudFirms = allData.filter(item => item.docType === 'company');
+              cloudFirms = allData.filter(item => item && item.docType === 'company');
             } else {
               if (allData.firm_templates) {
-                Object.keys(allData.firm_templates).forEach(k => {
-                  cloudTemplates[k] = allData.firm_templates[k];
-                });
+                const ft = allData.firm_templates;
+                if (Array.isArray(ft)) {
+                  ft.forEach(t => {
+                    if (t && t.id) cloudTemplates[t.id] = t;
+                  });
+                } else if (typeof ft === 'object') {
+                  Object.values(ft).forEach(t => {
+                    if (t && t.id) cloudTemplates[t.id] = t;
+                  });
+                }
               }
-              if (allData.companies) cloudFirms = allData.companies;
+              if (allData.companies) {
+                const comp = allData.companies;
+                cloudFirms = Array.isArray(comp) ? comp : Object.values(comp);
+              }
             }
 
             if (Object.keys(cloudTemplates).length > 0) {
@@ -138,7 +137,6 @@ export default function Templates() {
     fetchCloudTemplates();
   }, []);
 
-  // 🟢 Filter firms based on active designMode (Certificate vs Quotation)
   const filteredFirms = firms.filter(f => {
     if (designMode === 'certificate') return f.type === 'certificate';
     return f.type !== 'certificate';
@@ -146,7 +144,6 @@ export default function Templates() {
 
   const [selectedFirmId, setSelectedFirmId] = useState(filteredFirms[0]?.id || firms[0]?.id || '');
 
-  // Automatically switch selectedFirmId when designMode changes
   useEffect(() => {
     const matchingFirms = firms.filter(f => {
       if (designMode === 'certificate') return f.type === 'certificate';
@@ -157,11 +154,8 @@ export default function Templates() {
     }
   }, [designMode, firms]);
 
-  // Active Design State with full font & signature setups
   const [currentDesign, setCurrentDesign] = useState({
     themeColor: '#00a67e',
-    
-    // "CERTIFICATE" Text Box Setup
     certPos: 'left-vert',
     certPosX: 0,
     certPosY: 0,
@@ -171,20 +165,10 @@ export default function Templates() {
     certBold: true,
     certItalic: false,
     certUnderline: false,
-
-    // Font Families List with Add/Delete support
     customFonts: ['Arial', 'Georgia', 'Caveat', 'Times New Roman', 'Verdana'],
-
-    // Header Font Setup
     headerFont: 'Arial', headerSize: 36, headerColor: '#0f172a', headerBold: true, headerItalic: false, headerUnderline: false,
-    
-    // Doc Font Setup
     docFont: 'Georgia', docSize: 15.5, docColor: '#000000', docBold: false, docItalic: true, docUnderline: false,
-    
-    // Cust Font Setup
     custFont: 'Caveat', custSize: 20, custColor: '#000000', custBold: false, custItalic: false, custUnderline: false,
-
-    // Signature Specific Controls
     sigFont: 'Arial',
     sigSize: 14,
     sigColor: '#000000',
@@ -193,12 +177,8 @@ export default function Templates() {
     sigUnderline: false,
     sigX: 0,
     sigY: 0,
-
-    // A4 Background & Margin
     a4BgUrl: '',
     topMargin: 0,
-
-    // Quotation Specific Controls
     quoteThemeColor: '#1e40af',
     quoteTitle: 'QUOTATION',
     quoteTitleFont: 'Arial',
@@ -209,16 +189,12 @@ export default function Templates() {
     quoteTitleUnderline: false,
     quoteTitleX: 0,
     quoteTitleY: 0,
-    
     headerTemp: 'h-classic-left',
     headerFontFam: 'Arial', headerFontSize: 34, headerFontColor: '#dc2626', headerFontBold: true, headerFontItalic: false, headerFontUnderline: false,
-    
     billingTemp: 'b-classic-split',
     billingFontFam: 'Arial', billingFontSize: 12, billingFontColor: '#0f172a', billingFontBold: false, billingFontItalic: false, billingFontUnderline: false,
-    
     tableTemp: 'table-base',
     tableFontFam: 'Arial', tableFontSize: 12, tableFontColor: '#0f172a', tableFontBold: false, tableFontItalic: false, tableFontUnderline: false,
-
     quoteTermText: '* Terms & Conditions: Validity 30 days. E.& O.E.',
     quoteTermFontFam: 'Arial',
     quoteTermFontSize: 10,
@@ -228,8 +204,6 @@ export default function Templates() {
     quoteTermFontUnderline: false,
     quoteTermX: 0,
     quoteTermY: 0,
-
-    // Graphics Slots
     graphics: {
       logo: { url: '', x: 0, y: 0, size: 100 },
       stamp: { url: '', x: 0, y: 0, size: 100 },
@@ -242,10 +216,8 @@ export default function Templates() {
     }
   });
 
-  // Unique composite key to separate certificate vs quotation designs per firm
   const templateKey = `${selectedFirmId}_${designMode}`;
 
-  // Load firm & mode specific template safely when selectedFirmId or designMode changes
   useEffect(() => {
     if (selectedFirmId) {
       if (firmTemplates[templateKey]) {
@@ -256,7 +228,6 @@ export default function Templates() {
     }
   }, [selectedFirmId, designMode, firmTemplates]);
 
-  // Save current design locally instantly
   useEffect(() => {
     if (selectedFirmId) {
       try {
@@ -276,7 +247,6 @@ export default function Templates() {
     try {
       alert(`⏳ Saving template for "${activeFirmObj.name}" to cloud... Please wait.`);
 
-      // Save full design including graphics to Cloud since images are heavily optimized / KB sized
       const basePayload = {
         id: String(templateKey),
         docType: 'firm_template',
@@ -286,7 +256,6 @@ export default function Templates() {
         updatedAt: currentTimestamp
       };
 
-      // 1. Save Full Template to Backend
       const res1 = await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -299,12 +268,10 @@ export default function Templates() {
 
       if (!res1.ok) throw new Error(`Server returned status ${res1.status}`);
 
-      // 2. Local Storage & State Update (Keeping full currentDesign with graphics intact)
       const updatedTemplates = { ...firmTemplates, [templateKey]: currentDesign };
       setFirmTemplates(updatedTemplates);
       localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updatedTemplates));
 
-      // 3. Electron Local SQLite Sync
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) {
@@ -322,7 +289,6 @@ export default function Templates() {
     }
   };
 
-  // Categories & Capacities Sync
   const [categories, setCategories] = useState(() => {
     try {
       const saved = localStorage.getItem('ERP_CertCategories_v104');
