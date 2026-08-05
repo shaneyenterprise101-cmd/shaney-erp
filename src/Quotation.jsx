@@ -836,8 +836,31 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     const matchesFY = filterFY === 'ALL' || rowFY === filterFY || rowFY.includes(filterFY);
     return matchesSearch && matchesFirm && matchesFY;
   }).sort((a, b) => {
-    let aVal = a[sortConfig.key] || ''; let bVal = b[sortConfig.key] || '';
-    if (sortConfig.key === 'total') { aVal = Number(a.total || 0); bVal = Number(b.total || 0); }
+    // 🟢 Robust Numerical Extractor for Quotation References
+    if (sortConfig.key === 'ref') {
+      const getNum = (str) => {
+        const match = String(str || '').match(/(\d+)(?!.*\d)/);
+        return match ? parseInt(match[1], 10) : 0;
+      };
+      const numA = getNum(a.ref);
+      const numB = getNum(b.ref);
+      if (numA !== numB) {
+        return sortConfig.direction === 'asc' ? numA - numB : numB - numA;
+      }
+      return sortConfig.direction === 'asc' ? String(a.ref).localeCompare(b.ref) : String(b.ref).localeCompare(a.ref);
+    }
+
+    let aVal = a[sortConfig.key] || ''; 
+    let bVal = b[sortConfig.key] || '';
+    
+    if (sortConfig.key === 'total') { 
+      aVal = Number(a.total || 0); 
+      bVal = Number(b.total || 0); 
+    } else {
+      aVal = String(aVal);
+      bVal = String(bVal);
+    }
+
     if (aVal < bVal) return sortConfig.direction === 'asc' ? -1 : 1;
     if (aVal > bVal) return sortConfig.direction === 'asc' ? 1 : -1;
     return 0;

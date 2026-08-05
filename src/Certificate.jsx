@@ -940,6 +940,20 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
     return matchesSearch && matchesFirm && matchesStatus && matchesFY && matchesMonth && matchesYearNum;
   }).sort((a, b) => {
+    // 🟢 Robust Numerical & Field Extractor for Sorting
+    if (sortConfig.key === 'ref') {
+      const getNum = (str) => {
+        const match = String(str || '').match(/(\d+)(?!.*\d)/);
+        return match ? parseInt(match[1], 10) : 0;
+      };
+      const numA = getNum(a.ref);
+      const numB = getNum(b.ref);
+      if (numA !== numB) {
+        return sortConfig.direction === 'asc' ? numA - numB : numB - numA;
+      }
+      return sortConfig.direction === 'asc' ? String(a.ref).localeCompare(b.ref) : String(b.ref).localeCompare(a.ref);
+    }
+
     let aVal = a[sortConfig.key] || '';
     let bVal = b[sortConfig.key] || '';
 
