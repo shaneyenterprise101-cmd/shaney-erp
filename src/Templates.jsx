@@ -8,7 +8,7 @@ const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 const sanitizeForCloud = (dataObj) => {
   let cleaned = { ...dataObj };
   if (!cleaned.updatedAt) {
-    cleaned.updatedAt = Date.now(); // 🟢 Timestamp fallback
+    cleaned.updatedAt = Date.now();
   }
   Object.keys(cleaned).forEach(key => {
     if (cleaned[key] === undefined) {
@@ -52,7 +52,7 @@ export default function Templates() {
   // 🟢 Mobile Drawer / Modal Preview State for Templates
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
-  // Load Companies from Settings
+  // Load Companies from Settings / Local-First
   const [firms, setFirms] = useState(() => {
     try {
       const saved = localStorage.getItem('ERP_Companies_v104');
@@ -61,6 +61,16 @@ export default function Templates() {
       ];
     } catch (e) {
       return [{ id: 'comp_cert_1', type: 'certificate', name: 'Shaney Enterprise', address: '112, Royal Plaza, Junagadh', contact: '+91 9726350101' }];
+    }
+  });
+
+  // Firm-Wise Templates Database State using version 104 (Local First)
+  const [firmTemplates, setFirmTemplates] = useState(() => {
+    try {
+      const saved = localStorage.getItem('ERP_FirmTemplates_v104');
+      return saved ? JSON.parse(saved) : {};
+    } catch (e) {
+      return {};
     }
   });
 
@@ -86,7 +96,7 @@ export default function Templates() {
     return () => window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
   }, []);
 
-  // 🟢 Fetch templates from Cloud on load
+  // 🟢 Fetch templates from Cloud on load (Cloud-Download to Local Cache)
   useEffect(() => {
     const fetchCloudTemplates = async () => {
       try {
@@ -147,16 +157,6 @@ export default function Templates() {
     }
   }, [designMode, firms]);
 
-  // Firm-Wise Templates Database State using version 104
-  const [firmTemplates, setFirmTemplates] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ERP_FirmTemplates_v104');
-      return saved ? JSON.parse(saved) : {};
-    } catch (e) {
-      return {};
-    }
-  });
-
   // Active Design State with full font & signature setups
   const [currentDesign, setCurrentDesign] = useState({
     themeColor: '#00a67e',
@@ -178,10 +178,10 @@ export default function Templates() {
     // Header Font Setup
     headerFont: 'Arial', headerSize: 36, headerColor: '#0f172a', headerBold: true, headerItalic: false, headerUnderline: false,
     
-    // Doc Font Setup (Controls Body, Date, Serial No & Table Text)
+    // Doc Font Setup
     docFont: 'Georgia', docSize: 15.5, docColor: '#000000', docBold: false, docItalic: true, docUnderline: false,
     
-    // Cust Font Setup (Controls Customer Name & Address)
+    // Cust Font Setup
     custFont: 'Caveat', custSize: 20, custColor: '#000000', custBold: false, custItalic: false, custUnderline: false,
 
     // Signature Specific Controls
@@ -254,7 +254,7 @@ export default function Templates() {
         setCurrentDesign(prev => ({ ...prev, ...firmTemplates[selectedFirmId] }));
       }
     }
-  }, [selectedFirmId, designMode]);
+  }, [selectedFirmId, designMode, firmTemplates]);
 
   // Save current design locally instantly
   useEffect(() => {
@@ -276,23 +276,17 @@ export default function Templates() {
     try {
       alert(`⏳ Saving template for "${activeFirmObj.name}" to cloud... Please wait.`);
 
-      // Keep currentDesign.graphics safe for local UI, create a stripped copy for cloud backend
-      const graphicsData = currentDesign.graphics || {};
-      const lightDesign = { 
-        ...currentDesign, 
-        graphics: {} 
-      };
-
+      // Save full design including graphics to Cloud since images are heavily optimized / KB sized
       const basePayload = {
         id: String(templateKey),
         docType: 'firm_template',
         firmId: selectedFirmId,
         designMode: designMode,
-        ...lightDesign,
+        ...currentDesign,
         updatedAt: currentTimestamp
       };
 
-      // 1. Save Core Settings to Backend (without heavy graphics in main payload)
+      // 1. Save Full Template to Backend
       const res1 = await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -305,40 +299,16 @@ export default function Templates() {
 
       if (!res1.ok) throw new Error(`Server returned status ${res1.status}`);
 
-      // 2. Save Graphics Separately
-      for (const [gKey, gVal] of Object.entries(graphicsData)) {
-        if (gVal && gVal.url) {
-          const graphicPayload = {
-            id: `${templateKey}_graphic_${gKey}`,
-            docType: 'firm_template_graphic',
-            templateKey: templateKey,
-            slotKey: gKey,
-            graphicData: gVal,
-            updatedAt: currentTimestamp
-          };
-
-          await fetch(`${BACKEND_URL}/api/data`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              type: 'firm_templates_graphics', 
-              id: String(graphicPayload.id), 
-              data: sanitizeForCloud(graphicPayload) 
-            })
-          });
-        }
-      }
-
-      // 3. Local Storage & State Update (KEEPING full currentDesign with graphics so UI doesn't lose them)
+      // 2. Local Storage & State Update (Keeping full currentDesign with graphics intact)
       const updatedTemplates = { ...firmTemplates, [templateKey]: currentDesign };
       setFirmTemplates(updatedTemplates);
       localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updatedTemplates));
 
-      // 4. Electron Local SQLite Sync
+      // 3. Electron Local SQLite Sync
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) {
-          await ipcRenderer.invoke('sqlite-save-record', { ...basePayload, graphics: graphicsData });
+          await ipcRenderer.invoke('sqlite-save-record', basePayload);
         }
       }
 
@@ -405,7 +375,6 @@ export default function Templates() {
     setCapacities(capacities.filter(c => c !== capToRemove));
   };
 
-  // Universal Font Add / Delete Handlers
   const handleAddFont = () => {
     const fName = prompt("Enter new font family name (e.g., Roboto, Open Sans):");
     if (fName && fName.trim()) {
@@ -432,7 +401,6 @@ export default function Templates() {
     }
   };
 
-  // 🟢 FIXED COMPRESSION TO PRESERVE TRANSPARENT PNG BACKGROUNDS
   const compressAndConvertToBase64 = (file, maxWidth = 300, maxHeight = 300) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -458,10 +426,8 @@ export default function Templates() {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, width, height); // Clear canvas to keep transparency
+          ctx.clearRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
-          
-          // Use 'image/png' to preserve transparent backgrounds for stamps & logos
           resolve(canvas.toDataURL('image/png'));
         };
         img.src = uploadEvent.target.result;
@@ -473,7 +439,7 @@ export default function Templates() {
   const handleGraphicFile = async (key, file) => {
     if (!file) return;
     try {
-      const compressedDataUrl = await compressAndConvertToBase64(file, 300, 300, 0.5);
+      const compressedDataUrl = await compressAndConvertToBase64(file, 300, 300);
       setCurrentDesign(prev => ({
         ...prev,
         graphics: {
@@ -510,14 +476,13 @@ export default function Templates() {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      const compressedDataUrl = await compressAndConvertToBase64(file, 400, 600, 0.6);
+      const compressedDataUrl = await compressAndConvertToBase64(file, 400, 600);
       setCurrentDesign(prev => ({ ...prev, a4BgUrl: compressedDataUrl }));
     } catch (err) {
       console.error("Background compression error:", err);
     }
   };
 
-  // 🟢 DRAG & DROP INTERACTION STATES FOR PREVIEW
   const [draggingKey, setDraggingKey] = useState(null);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
 
@@ -555,9 +520,6 @@ export default function Templates() {
   const activeFirmObj = firms.find(f => f.id === selectedFirmId) || filteredFirms[0] || firms[0] || { name: 'Shaney Enterprise', address: 'Junagadh', contact: '+91 9726350101' };
   const currentGraphics = currentDesign.graphics || {};
 
-  // =========================================================================
-  // 🚀 QUOTATION LAYOUT GENERATORS
-  // =========================================================================
   const getQuoteHeaderHTML = () => {
     const v = currentDesign;
     const cColor = v.quoteThemeColor;
@@ -680,10 +642,8 @@ export default function Templates() {
     };
   };
 
-  // RENDER A4 TEMPLATE CONTENT
   const renderA4Content = () => {
     return designMode === 'certificate' ? (
-      /* CERTIFICATE PREVIEW */
       <div 
         className="bg-white shadow-2xl relative w-[794px] h-[1123px] min-w-[794px] min-h-[1123px] overflow-hidden flex flex-col shrink-0 box-border z-0 p-8"
         style={{
@@ -875,7 +835,6 @@ export default function Templates() {
         </div>
       </div>
     ) : (
-      /* QUOTATION PREVIEW WITH ONLY LOGO & STAMP (DRAGGABLE) */
       <div className="bg-white shadow-2xl relative w-[794px] h-[1123px] min-w-[794px] min-h-[1123px] overflow-hidden flex flex-col shrink-0 box-border z-0 p-10">
         {['logo', 'stamp'].map((k) => {
           const g = currentGraphics[k];
@@ -994,14 +953,12 @@ export default function Templates() {
     >
       
       <style dangerouslySetInnerHTML={{__html: `
-        /* CERTIFICATE STYLES */
         .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; background: #fff; }
         .cert-table th { padding: 5px; text-align: center; border: 1px solid #000; background: #f8fafc; font-family: ${currentDesign.docFont}, sans-serif; font-size: ${currentDesign.docSize}px; color: ${currentDesign.docColor}; font-weight: ${currentDesign.docBold ? 'bold' : 'bold'}; font-style: ${currentDesign.docItalic ? 'italic' : 'normal'}; text-decoration: ${currentDesign.docUnderline ? 'underline' : 'none'}; }
         .cert-table td { padding: 4px 5px; text-align: center; border: 1px solid #000; font-family: ${currentDesign.docFont}, sans-serif; font-size: ${currentDesign.docSize}px; color: ${currentDesign.docColor}; font-weight: ${currentDesign.docBold ? 'bold' : 'normal'}; font-style: ${currentDesign.docItalic ? 'italic' : 'normal'}; text-decoration: ${currentDesign.docUnderline ? 'underline' : 'none'}; }
         .cert-table td.left-align { text-align: left; padding-left: 10px; }
         .vert-text-stable { display: flex; flex-direction: column; gap: 8px; font-size: 42px; font-weight: 900; line-height: 1; text-align: center; }
         
-        /* QUOTATION TABLE STYLES */
         .table-base th { padding: 12px 10px; border-bottom: 2px solid ${currentDesign.quoteThemeColor}; text-transform: uppercase; }
         .table-base td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
         .table-striped tbody tr:nth-child(even) { background-color: #f8fafc; }
@@ -1026,7 +983,6 @@ export default function Templates() {
         .table-spaced td { background: #f8fafc; padding: 12px 10px; }
       `}} />
 
-      {/* 🟢 MOBILE PREVIEW DRAWER (Triggered via Preview Button, Clean Bottom) */}
       {isMobilePreviewOpen && (
         <div className="fixed inset-0 z-[99999] flex flex-col justify-end bg-slate-900/70 backdrop-blur-sm transition-all duration-300 lg:hidden">
           <div className="w-full h-[90vh] bg-slate-100 rounded-t-3xl flex flex-col shadow-2xl overflow-hidden animate-[slideUp_0.3s]">
@@ -1053,23 +1009,17 @@ export default function Templates() {
       <div className="max-w-7xl mx-auto pb-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         
-        {/* ========================================================= */}
-        {/* LEFT SIDE: CONTROLS & SETTINGS (5 Columns) */}
-        {/* ========================================================= */}
         <div className="lg:col-span-5 flex flex-col gap-5 max-h-[85vh] overflow-y-auto pr-2 custom-scrollbar">
           
-          {/* ⚙️ SELECT DESIGN MODE & MOBILE PREVIEW BUTTON */}
           <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3">
             <div className="flex justify-between items-center">
               <label className="text-[11px] font-black text-slate-700 uppercase tracking-widest">
                 ⚙️ Select Design Mode
               </label>
-              {/* Mobile Preview Eye Button */}
               <button 
                 type="button" 
                 onClick={() => setIsMobilePreviewOpen(true)} 
                 className="lg:hidden bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold text-xs px-3 py-2 rounded-lg uppercase transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
-                title="Preview A4 Document"
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
@@ -1088,7 +1038,6 @@ export default function Templates() {
             </select>
           </div>
 
-          {/* 🎨 CONNECTED FIRM SELECTOR DROPDOWN WITH SAVE TO CLOUD BUTTON */}
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col gap-3">
             <div className="flex justify-between items-center border-b border-slate-100 pb-2">
               <h3 className="font-black text-slate-800 text-[11px] uppercase text-indigo-600">
@@ -1115,9 +1064,6 @@ export default function Templates() {
             </select>
           </div>
 
-          {/* ========================================================= */}
-          {/* 📄 CERTIFICATE TEMPLATE CONTROLS */}
-          {/* ========================================================= */}
           {designMode === 'certificate' && (
             <div className="flex flex-col gap-4 animate-[fadeIn_0.2s_ease-in-out]">
               <div className="bg-teal-50 border border-teal-200 p-4 rounded-2xl shadow-sm flex flex-col gap-4">
@@ -1133,7 +1079,6 @@ export default function Templates() {
                   />
                 </div>
 
-                {/* "CERTIFICATE" POSITION WITH SIDE-BY-SIDE X & Y */}
                 <div>
                   <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5">"Certificate" Position</label>
                   <div className="grid grid-cols-12 gap-2">
@@ -1151,7 +1096,6 @@ export default function Templates() {
                   </div>
                 </div>
 
-                {/* CERTIFICATE TEXT FONT SETUP */}
                 <div className="flex flex-col gap-1.5">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase">Certificate Text Font Setup</label>
                   <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
@@ -1170,7 +1114,6 @@ export default function Templates() {
                   </div>
                 </div>
 
-                {/* HEADER FONT SETUP */}
                 <div className="flex flex-col gap-1.5">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase">Header Font Setup</label>
                   <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
@@ -1189,7 +1132,6 @@ export default function Templates() {
                   </div>
                 </div>
 
-                {/* DOC FONT SETUP */}
                 <div className="flex flex-col gap-1.5">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase">Doc Font Setup (Body, Date, Table)</label>
                   <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
@@ -1208,7 +1150,6 @@ export default function Templates() {
                   </div>
                 </div>
 
-                {/* CUST FONT SETUP */}
                 <div className="flex flex-col gap-1.5">
                   <label className="block text-[10px] font-bold text-slate-500 uppercase">Cust Font Setup (Customer & Address)</label>
                   <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
@@ -1227,7 +1168,6 @@ export default function Templates() {
                   </div>
                 </div>
 
-                {/* SIGNATURE SETUP */}
                 <div className="flex flex-col gap-1.5 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
                   <label className="block text-[10px] font-bold text-slate-700 uppercase">Signature Setup (Center Aligned)</label>
                   <div className="grid grid-cols-12 gap-1 items-center">
@@ -1247,7 +1187,6 @@ export default function Templates() {
                   </div>
                 </div>
 
-                {/* A4 Background & Top Margin */}
                 <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2">
                   <div className="flex justify-between items-center">
                     <label className="text-[10px] font-black uppercase text-slate-700">A4 Background</label>
@@ -1260,7 +1199,6 @@ export default function Templates() {
                   </div>
                 </div>
 
-                {/* ALL GRAPHICS SLOTS */}
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { name: 'Top Logo', key: 'logo' },
@@ -1291,7 +1229,6 @@ export default function Templates() {
                 </div>
               </div>
 
-              {/* 🔥 MAIN CATEGORIES BUILDER */}
               <div className="bg-red-50 p-4 rounded-xl border border-red-200 shadow-sm">
                 <h4 className="font-black text-[11px] text-red-900 uppercase mb-2 border-b border-red-200 pb-2">🔥 Main Categories</h4>
                 <form onSubmit={handleAddCategory} className="flex gap-2 mb-3">
@@ -1313,7 +1250,6 @@ export default function Templates() {
                 </div>
               </div>
 
-              {/* 📏 CAPACITIES BUILDER */}
               <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm">
                 <h4 className="font-black text-[11px] text-blue-900 uppercase mb-2 border-b border-blue-200 pb-2">📏 Capacities</h4>
                 <form onSubmit={handleAddCapacity} className="flex gap-2 mb-3">
@@ -1338,9 +1274,6 @@ export default function Templates() {
             </div>
           )}
 
-          {/* ========================================================= */}
-          {/* 🧾 QUOTATION TEMPLATE CONTROLS */}
-          {/* ========================================================= */}
           {designMode === 'quotation' && (
             <div className="flex flex-col gap-4 mt-2 animate-[fadeIn_0.2s_ease-in-out]">
               
@@ -1372,8 +1305,8 @@ export default function Templates() {
                       {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
                     </select>
                     <div className="col-span-2 flex items-center gap-0.5 justify-center">
-                      <button type="button" onClick={handleAddFont} title="Add Font" className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                      <button type="button" onClick={() => handleDeleteFont(currentDesign.quoteTitleFont)} title="Delete Active Font" className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
+                      <button type="button" onClick={() => handleDeleteFont(currentDesign.quoteTitleFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
                     </div>
                     <input type="number" value={currentDesign.quoteTitleSize} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
                     <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTitleBold: !currentDesign.quoteTitleBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.quoteTitleBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
@@ -1611,9 +1544,6 @@ export default function Templates() {
 
         </div>
 
-        {/* ========================================================= */}
-        {/* RIGHT SIDE: FULL A4 PREVIEW (Desktop Only) */}
-        {/* ========================================================= */}
         <div className="hidden lg:flex lg:col-span-7 bg-slate-300 p-6 rounded-2xl shadow-inner border border-slate-400 justify-center items-center overflow-y-auto overflow-x-hidden h-[78vh] w-full custom-scrollbar relative">
           <div className="m-auto flex justify-center items-center py-10 w-full">
             <div className="origin-center transform scale-[0.65] xl:scale-[0.75] transition-transform shadow-2xl bg-white">
