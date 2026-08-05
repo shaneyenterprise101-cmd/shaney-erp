@@ -8,7 +8,10 @@ import qrcode from 'qrcode';
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+
+// 🟢 Increased body payload limit to 50MB to prevent 413 Payload Too Large errors on large templates/images
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 const server = http.createServer(app);
 const io = new Server(server, {
@@ -266,11 +269,17 @@ app.post('/api/data', (req, res) => {
     }
 
     let list = masterState[storageKey];
-    const index = list.findIndex(i => String(i.id) === String(itemToSave.id));
-    if (index !== -1) {
-        list[index] = itemToSave;
+    
+    // Check if list is an array, if not (like objects/templates), overwrite directly
+    if (Array.isArray(list)) {
+        const index = list.findIndex(i => String(i.id) === String(itemToSave.id));
+        if (index !== -1) {
+            list[index] = itemToSave;
+        } else {
+            list.push(itemToSave);
+        }
     } else {
-        list.push(itemToSave);
+        masterState[storageKey] = itemToSave;
     }
 
     saveMasterStateToFile();
@@ -283,7 +292,7 @@ app.post('/api/data/delete', (req, res) => {
         return res.status(400).json({ success: false, error: 'Key and itemId required' });
     }
 
-    if (masterState[key]) {
+    if (masterState[key] && Array.isArray(masterState[key])) {
         masterState[key] = masterState[key].filter(i => String(i.id) !== String(itemId));
         saveMasterStateToFile();
     }
