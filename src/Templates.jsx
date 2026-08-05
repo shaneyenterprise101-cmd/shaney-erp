@@ -269,55 +269,79 @@ export default function Templates() {
     }
   }, [currentDesign, selectedFirmId, designMode]);
 
-  // 🟢 BULLETPROOF CLOUD SYNC & LOCAL PERSISTENCE FOR TEMPLATES
+  // 🟢 1-BY-1 MODULAR CLOUD SYNC TO AVOID 413 PAYLOAD ERRORS
   const handleSaveTemplateToCloud = async () => {
     if (!selectedFirmId) return;
     const currentTimestamp = Date.now();
-    const templatePayload = {
-      id: String(templateKey),
-      docType: 'firm_template',
-      firmId: selectedFirmId,
-      designMode: designMode,
-      ...currentDesign,
-      updatedAt: currentTimestamp
-    };
 
     try {
-      // 1. Local State & Storage Update Immediately
-      const updatedTemplates = { ...firmTemplates, [templateKey]: currentDesign };
-      setFirmTemplates(updatedTemplates);
-      localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updatedTemplates));
+      alert(`⏳ Saving template for "${activeFirmObj.name}" in steps... Please wait.`);
 
-      // 2. Push to Render Backend API (DynamoDB Sync)
-      const res = await fetch(`${BACKEND_URL}/api/data`, {
+      const coreDesignWithoutImages = { ...currentDesign };
+      const graphicsData = coreDesignWithoutImages.graphics || {};
+      coreDesignWithoutImages.graphics = {};
+
+      const basePayload = {
+        id: String(templateKey),
+        docType: 'firm_template',
+        firmId: selectedFirmId,
+        designMode: designMode,
+        ...coreDesignWithoutImages,
+        updatedAt: currentTimestamp
+      };
+
+      const res1 = await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           type: 'firm_templates', 
           id: String(templateKey), 
-          data: sanitizeForCloud(templatePayload) 
+          data: sanitizeForCloud(basePayload) 
         })
       });
 
-      if (!res.ok) {
-        throw new Error(`Server returned status ${res.status}`);
-      }
+      if (!res1.ok) throw new Error(`Failed at core sync: Status ${res1.status}`);
 
-      // 3. Electron Local SQLite Sync if running as desktop app (.exe)
-      if (window.require) {
-        const { ipcRenderer } = window.require('electron');
-        if (ipcRenderer) {
-          await ipcRenderer.invoke('sqlite-save-record', templatePayload);
+      for (const [gKey, gVal] of Object.entries(graphicsData)) {
+        if (gVal && gVal.url) {
+          const graphicPayload = {
+            id: `${templateKey}_graphic_${gKey}`,
+            docType: 'firm_template_graphic',
+            templateKey: templateKey,
+            slotKey: gKey,
+            graphicData: gVal,
+            updatedAt: currentTimestamp
+          };
+
+          await fetch(`${BACKEND_URL}/api/data`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              type: 'firm_templates_graphics', 
+              id: String(graphicPayload.id), 
+              data: sanitizeForCloud(graphicPayload) 
+            })
+          });
         }
       }
 
-      // 4. Broadcast Event for Real-time Cross-Component Sync
+      const updatedTemplates = { ...firmTemplates, [templateKey]: currentDesign };
+      setFirmTemplates(updatedTemplates);
+      localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updatedTemplates));
+
+      if (window.require) {
+        const { ipcRenderer } = window.require('electron');
+        if (ipcRenderer) {
+          await ipcRenderer.invoke('sqlite-save-record', basePayload);
+        }
+      }
+
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'templates' } }));
-      logActionToBackend(`Saved ${designMode} template for firm ID: ${selectedFirmId}`);
+      logActionToBackend(`Saved ${designMode} template and graphics 1-by-1 for firm ID: ${selectedFirmId}`);
       
-      alert(`✅ ${designMode.toUpperCase()} Template for "${activeFirmObj.name}" saved to Cloud successfully!`);
+      alert(`✅ ${designMode.toUpperCase()} Template and all graphics for "${activeFirmObj.name}" saved to Cloud successfully in steps!`);
     } catch (err) {
-      console.error("Cloud template save error:", err);
+      console.error("1-by-1 Cloud template save error:", err);
       alert("❌ Failed to save template to cloud: " + err.message);
     }
   };
@@ -403,7 +427,7 @@ export default function Templates() {
   };
 
   // 🟢 COMPRESSION UTILITY TO PREVENT 413 PAYLOAD ERRORS
-  const compressAndConvertToBase64 = (file, maxWidth = 600, maxHeight = 600, quality = 0.7) => {
+  const compressAndConvertToBase64 = (file, maxWidth = 300, maxHeight = 300, quality = 0.5) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (uploadEvent) => {
@@ -440,7 +464,7 @@ export default function Templates() {
   const handleGraphicFile = async (key, file) => {
     if (!file) return;
     try {
-      const compressedDataUrl = await compressAndConvertToBase64(file, 500, 500, 0.7);
+      const compressedDataUrl = await compressAndConvertToBase64(file, 300, 300, 0.5);
       setCurrentDesign(prev => ({
         ...prev,
         graphics: {
@@ -477,7 +501,7 @@ export default function Templates() {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      const compressedDataUrl = await compressAndConvertToBase64(file, 800, 1100, 0.75);
+      const compressedDataUrl = await compressAndConvertToBase64(file, 400, 600, 0.6);
       setCurrentDesign(prev => ({ ...prev, a4BgUrl: compressedDataUrl }));
     } catch (err) {
       console.error("Background compression error:", err);
