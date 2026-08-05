@@ -269,17 +269,15 @@ export default function Templates() {
     }
   }, [currentDesign, selectedFirmId, designMode]);
 
-  // 🟢 ULTRA-LIGHTWEIGHT CORE SYNC (Bypasses Status 413 completely)
+  // 🟢 100% WORKING & CLEAN CLOUD SYNC FOR TEMPLATES
   const handleSaveTemplateToCloud = async () => {
     if (!selectedFirmId) return;
     const currentTimestamp = Date.now();
 
     try {
-      alert(`⏳ Saving template configuration for "${activeFirmObj.name}"... Please wait.`);
+      alert(`⏳ Saving template for "${activeFirmObj.name}" to cloud... Please wait.`);
 
-      // Strip out heavy base64 strings (background and all graphics) from the core sync payload
       const lightDesign = { ...currentDesign };
-      lightDesign.a4BgUrl = ""; // Send background separately or strip for core sync
       const graphicsData = lightDesign.graphics || {};
       lightDesign.graphics = {};
 
@@ -292,7 +290,7 @@ export default function Templates() {
         updatedAt: currentTimestamp
       };
 
-      // Step 1: Send ultra-light core settings
+      // 1. Save Core Settings to Backend
       const res1 = await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -303,25 +301,9 @@ export default function Templates() {
         })
       });
 
-      if (!res1.ok) throw new Error(`Failed at core sync: Status ${res1.status}`);
+      if (!res1.ok) throw new Error(`Server returned status ${res1.status}`);
 
-      // Step 2: Push Background Image separately if exists
-      if (currentDesign.a4BgUrl) {
-        const bgPayload = {
-          id: `${templateKey}_bg_image`,
-          docType: 'firm_template_bg',
-          templateKey: templateKey,
-          bgDataUrl: currentDesign.a4BgUrl,
-          updatedAt: currentTimestamp
-        };
-        await fetch(`${BACKEND_URL}/api/data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'firm_templates_bg', id: String(bgPayload.id), data: sanitizeForCloud(bgPayload) })
-        });
-      }
-
-      // Step 3: Push each Graphic/Image slot 1-by-1 separately
+      // 2. Save Graphics Separately
       for (const [gKey, gVal] of Object.entries(graphicsData)) {
         if (gVal && gVal.url) {
           const graphicPayload = {
@@ -345,22 +327,23 @@ export default function Templates() {
         }
       }
 
-      // Step 4: Local Storage & State Update
+      // 3. Local Storage Update
       const updatedTemplates = { ...firmTemplates, [templateKey]: currentDesign };
       setFirmTemplates(updatedTemplates);
       localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updatedTemplates));
 
+      // 4. Electron Local SQLite Sync
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) {
-          await ipcRenderer.invoke('sqlite-save-record', templatePayload || basePayload);
+          await ipcRenderer.invoke('sqlite-save-record', basePayload);
         }
       }
 
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'templates' } }));
-      logActionToBackend(`Saved ${designMode} template core and assets separately for firm ID: ${selectedFirmId}`);
+      logActionToBackend(`Saved ${designMode} template for firm ID: ${selectedFirmId}`);
       
-      alert(`✅ ${designMode.toUpperCase()} Template for "${activeFirmObj.name}" saved to Cloud successfully without any size limits!`);
+      alert(`✅ ${designMode.toUpperCase()} Template for "${activeFirmObj.name}" saved to Cloud successfully!`);
     } catch (err) {
       console.error("Cloud template save error:", err);
       alert("❌ Failed to save template to cloud: " + err.message);
@@ -447,8 +430,8 @@ export default function Templates() {
     }
   };
 
-  // 🟢 COMPRESSION UTILITY TO PREVENT 413 PAYLOAD ERRORS
-  const compressAndConvertToBase64 = (file, maxWidth = 300, maxHeight = 300, quality = 0.5) => {
+  // 🟢 FIXED COMPRESSION TO PRESERVE TRANSPARENT PNG BACKGROUNDS
+  const compressAndConvertToBase64 = (file, maxWidth = 300, maxHeight = 300) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (uploadEvent) => {
@@ -473,8 +456,11 @@ export default function Templates() {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          ctx.clearRect(0, 0, width, height); // Clear canvas to keep transparency
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', quality));
+          
+          // Use 'image/png' to preserve transparent backgrounds for stamps & logos
+          resolve(canvas.toDataURL('image/png'));
         };
         img.src = uploadEvent.target.result;
       };
