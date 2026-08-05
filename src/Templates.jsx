@@ -269,7 +269,7 @@ export default function Templates() {
     }
   }, [currentDesign, selectedFirmId, designMode]);
 
-  // 🟢 UPDATED WITH SQLITE IPC AND EXACT TIMESTAMP FOR DELTA SYNC
+  // 🟢 BULLETPROOF CLOUD SYNC & LOCAL PERSISTENCE FOR TEMPLATES
   const handleSaveTemplateToCloud = async () => {
     if (!selectedFirmId) return;
     const currentTimestamp = Date.now();
@@ -279,21 +279,42 @@ export default function Templates() {
       firmId: selectedFirmId,
       designMode: designMode,
       ...currentDesign,
-      updatedAt: currentTimestamp // 🟢 Exact Timestamp
+      updatedAt: currentTimestamp
     };
 
     try {
-      await fetch(`${BACKEND_URL}/api/data`, {
+      // 1. Local State & Storage Update Immediately
+      const updatedTemplates = { ...firmTemplates, [templateKey]: currentDesign };
+      setFirmTemplates(updatedTemplates);
+      localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updatedTemplates));
+
+      // 2. Push to Render Backend API (DynamoDB Sync)
+      const res = await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'firm_templates', id: String(templateKey), data: sanitizeForCloud(templatePayload) })
+        body: JSON.stringify({ 
+          type: 'firm_templates', 
+          id: String(templateKey), 
+          data: sanitizeForCloud(templatePayload) 
+        })
       });
+
+      if (!res.ok) {
+        throw new Error(`Server returned status ${res.status}`);
+      }
+
+      // 3. Electron Local SQLite Sync if running as desktop app (.exe)
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
-        if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', templatePayload);
+        if (ipcRenderer) {
+          await ipcRenderer.invoke('sqlite-save-record', templatePayload);
+        }
       }
+
+      // 4. Broadcast Event for Real-time Cross-Component Sync
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'templates' } }));
       logActionToBackend(`Saved ${designMode} template for firm ID: ${selectedFirmId}`);
+      
       alert(`✅ ${designMode.toUpperCase()} Template for "${activeFirmObj.name}" saved to Cloud successfully!`);
     } catch (err) {
       console.error("Cloud template save error:", err);

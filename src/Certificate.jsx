@@ -1002,7 +1002,21 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   if (isPreviewOpen && activePreviewCert) {
      const dFirmObj = firms.find(f => f.name === activePreviewCert.vendor) || firms[0] || {};
-     const dDesign = firmTemplates[dFirmObj.id] || currentDesign;
+     
+     // 🟢 Robust Template Matching (Match by ID or Name to prevent template mismatch)
+     let dDesign = currentDesign;
+     if (dFirmObj.id && firmTemplates[dFirmObj.id]) {
+       dDesign = firmTemplates[dFirmObj.id];
+     } else if (activePreviewCert.vendor) {
+       const matchedFirmEntry = Object.entries(firmTemplates).find(([firmId]) => {
+         const foundFirm = firms.find(f => f.id === firmId);
+         return foundFirm && foundFirm.name.toLowerCase() === activePreviewCert.vendor.toLowerCase();
+       });
+       if (matchedFirmEntry) {
+         dDesign = matchedFirmEntry[1];
+       }
+     }
+
      drawerPayload = {
        firmObj: dFirmObj,
        design: dDesign,
