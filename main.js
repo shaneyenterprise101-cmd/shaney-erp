@@ -234,6 +234,9 @@ function createWindow() {
     }
   });
 
+  // 🟢 DevTools open karne ke liye taaki Electron build mein error pata chal sake
+  mainWindow.webContents.openDevTools();
+
   mainWindow.loadFile(path.join(__dirname, 'dist/index.html'));
   mainWindow.setMenuBarVisibility(false);
 }

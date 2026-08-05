@@ -1,9 +1,7 @@
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
-// Unified Sync Manager to interact with Render Backend API & Local Storage / SQLite (0 Direct Firebase SDK Reads/Writes)
 export const SyncManager = {
   
-  // 1. Load Data (LocalStorage pehle, taaki instant load ho)
   getLocalData(key, fallback = []) {
     try {
       const data = localStorage.getItem(key);
@@ -13,12 +11,12 @@ export const SyncManager = {
     }
   },
 
-  // 2. Save Data locally and push to Render Backend & SQLite IPC
   async saveData(storageKey, firestoreCollection, item) {
     try {
       let list = this.getLocalData(storageKey, []);
-      const itemPayload = { ...item, updatedAt: item.updatedAt || Date.now() };
-      const index = list.findIndex(i => i.id === item.id);
+      const itemPayload = { ...item, updatedAt: Date.now() };
+      
+      const index = list.findIndex(i => String(i.id) === String(item.id));
       if (index !== -1) {
         list[index] = itemPayload;
       } else {
@@ -26,18 +24,28 @@ export const SyncManager = {
       }
       localStorage.setItem(storageKey, JSON.stringify(list));
 
-      // Sync to Render Backend (AWS DynamoDB)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'all' } }));
+      }
+
+      // Save to Local SQLite via Electron IPC if running as desktop app
+      if (typeof window !== 'undefined' && window.require) {
+        try {
+          const { ipcRenderer } = window.require('electron');
+          if (ipcRenderer) {
+            await ipcRenderer.invoke('sqlite-save-record', itemPayload);
+          }
+        } catch (err) {
+          console.error("Electron SQLite save error:", err);
+        }
+      }
+
+      // Save to Cloud Backend API
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: firestoreCollection, id: String(item.id), data: itemPayload })
       });
-
-      // Sync to Local SQLite via Electron IPC if available
-      if (window.require) {
-        const { ipcRenderer } = window.require('electron');
-        if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', itemPayload);
-      }
 
       return true;
     } catch (e) {
@@ -46,21 +54,29 @@ export const SyncManager = {
     }
   },
 
-  // 3. Delete Data
   async deleteData(storageKey, firestoreCollection, itemId) {
     try {
       let list = this.getLocalData(storageKey, []);
-      list = list.filter(i => i.id !== itemId);
+      list = list.filter(i => String(i.id) !== String(itemId));
       localStorage.setItem(storageKey, JSON.stringify(list));
 
-      // Delete from Render Backend
-      await fetch(`${BACKEND_URL}/api/data/${itemId}`, { method: 'DELETE' });
-
-      // Delete/Mark deleted in SQLite IPC
-      if (window.require) {
-        const { ipcRenderer } = window.require('electron');
-        if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id: itemId, deleted: true, updatedAt: Date.now() });
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'all' } }));
       }
+
+      // Save deletion to Local SQLite via Electron IPC
+      if (typeof window !== 'undefined' && window.require) {
+        try {
+          const { ipcRenderer } = window.require('electron');
+          if (ipcRenderer) {
+            await ipcRenderer.invoke('sqlite-save-record', { id: itemId, deleted: true, updatedAt: Date.now() });
+          }
+        } catch (err) {
+          console.error("Electron SQLite delete error:", err);
+        }
+      }
+
+      await fetch(`${BACKEND_URL}/api/data/${itemId}`, { method: 'DELETE' });
 
       return true;
     } catch (e) {
@@ -69,21 +85,111 @@ export const SyncManager = {
     }
   },
 
-  // 4. Fetch Fresh Data from Cloud Backend
   async fetchFreshDataIfNeeded(storageKey, firestoreCollection) {
     try {
-      const res = await fetch(`${BACKEND_URL}/api/data`);
-      if (res.ok) {
-        const allData = await res.json();
-        let cloudData = [];
-        if (Array.isArray(allData)) {
-          cloudData = allData.filter(item => item.docType === firestoreCollection || item.type === firestoreCollection);
-        } else if (allData[firestoreCollection] && Array.isArray(allData[firestoreCollection])) {
-          cloudData = allData[firestoreCollection];
+      // 1. First check Electron local SQLite DB if running as desktop app (.exe)
+      if (typeof window !== 'undefined' && window.require) {
+        try {
+          const { ipcRenderer } = window.require('electron');
+          if (ipcRenderer && storageKey === 'ERP_History_v104') {
+            const sqliteRecords = await ipcRenderer.invoke('sqlite-get-records');
+            if (Array.isArray(sqliteRecords) && sqliteRecords.length > 0) {
+              localStorage.setItem(storageKey, JSON.stringify(sqliteRecords));
+              return sqliteRecords;
+            }
+          }
+        } catch (err) {}
+      }
+
+      // 2. Fetch from Cloud Backend API with Retry Loop
+      let res = null;
+      let retries = 3;
+      while (retries > 0) {
+        try {
+          res = await fetch(`${BACKEND_URL}/api/data`);
+          if (res.ok) break;
+        } catch (err) {
+          retries--;
+          if (retries === 0) throw err;
+          await new Promise(r => setTimeout(r, 3000));
         }
-        if (cloudData.length > 0) {
-          localStorage.setItem(storageKey, JSON.stringify(cloudData));
-          return cloudData;
+      }
+
+      if (res && res.ok) {
+        const allData = await res.json();
+        let rawList = [];
+        
+        if (Array.isArray(allData)) {
+          rawList = allData;
+        } else if (allData && typeof allData === 'object') {
+          // 🟢 Direct Mapping for Cloud Response Structure (certificates, customers, products, etc.)
+          if (allData[firestoreCollection] && Array.isArray(allData[firestoreCollection])) {
+            rawList = allData[firestoreCollection];
+          } else if (storageKey === 'ERP_History_v104') {
+            // Combine certificates and quotations into ERP History history array
+            if (Array.isArray(allData.certificates)) rawList.push(...allData.certificates);
+            if (Array.isArray(allData.quotations)) rawList.push(...allData.quotations);
+            if (Array.isArray(allData.history)) rawList.push(...allData.history);
+          } else {
+            Object.values(allData).forEach(val => {
+              if (Array.isArray(val)) rawList.push(...val);
+            });
+          }
+        }
+
+        let cloudData = rawList.map(item => {
+          if (!item) return null;
+          if (item.data && typeof item.data === 'object') {
+            return { ...item.data, updatedAt: item.updatedAt || item.data.updatedAt || Date.now() };
+          }
+          return { ...item, updatedAt: item.updatedAt || Date.now() };
+        }).filter(item => {
+          if (!item || !item.id) return false;
+          return true;
+        });
+
+        if (Array.isArray(cloudData) && cloudData.length > 0) {
+          const localExisting = this.getLocalData(storageKey, []);
+          
+          const mergedMap = new Map();
+          localExisting.forEach(item => {
+            if (item && item.id != null) mergedMap.set(String(item.id), item);
+          });
+          
+          const getSafeTime = (val) => {
+            if (!val) return 0;
+            if (typeof val === 'number') return val;
+            const parsed = new Date(val).getTime();
+            return isNaN(parsed) ? 0 : parsed;
+          };
+
+          cloudData.forEach(cloudItem => {
+            if (cloudItem && cloudItem.id != null) {
+              const localItem = mergedMap.get(String(cloudItem.id));
+              const cloudTime = getSafeTime(cloudItem.updatedAt);
+              const localTime = getSafeTime(localItem?.updatedAt);
+              
+              if (!localItem || cloudTime >= localTime) {
+                mergedMap.set(String(cloudItem.id), cloudItem);
+              }
+            }
+          });
+
+          const merged = Array.from(mergedMap.values());
+          localStorage.setItem(storageKey, JSON.stringify(merged));
+
+          if (typeof window !== 'undefined' && window.require && storageKey === 'ERP_History_v104') {
+            try {
+              const { ipcRenderer } = window.require('electron');
+              if (ipcRenderer) {
+                for (let mItem of merged) {
+                  await ipcRenderer.invoke('sqlite-save-record', mItem);
+                }
+              }
+            } catch (err) {}
+          }
+
+          return merged;
         }
       }
     } catch (e) {
@@ -92,7 +198,6 @@ export const SyncManager = {
     return this.getLocalData(storageKey, []);
   },
 
-  // 🟢 5. LIVE OFFICE FEED LOGS
   async postOfficeLog(actionText, staffName) {
     try {
       const now = new Date();
@@ -122,7 +227,6 @@ export const SyncManager = {
     }
   },
 
-  // 🟢 6. FETCH RECENT OFFICE LOGS
   async getOfficeLogs() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/logs`);
@@ -139,7 +243,6 @@ export const SyncManager = {
     return this.getLocalData("ERP_Office_Live_Logs", []);
   },
 
-  // 🟢 7. HEARTBEAT / ONLINE PRESENCE (Throttled & Safe)
   async updateHeartbeat(username) {
     if (!username) return;
     try {
@@ -156,12 +259,9 @@ export const SyncManager = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'active_sessions', id: String(userKey), data: payload })
       });
-    } catch (e) {
-      // Fail silently to prevent console or file cluttering
-    }
+    } catch (e) {}
   },
 
-  // 🟢 8. GET ACTIVE SESSIONS
   async getActiveSessions() {
     try {
       const res = await fetch(`${BACKEND_URL}/api/data`);

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import { toJpeg } from 'html-to-image'; 
+import { SyncManager } from './SyncManager';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
@@ -9,6 +10,17 @@ const getCurrentFY = () => {
   const m = d.getMonth() + 1;
   const y = d.getFullYear();
   return m >= 4 ? `F.Y. ${y}-${String(y + 1).slice(-2)}` : `F.Y. ${y - 1}-${String(y).slice(-2)}`;
+};
+
+// --- ROBUST FY NORMALIZER ---
+const normalizeFY = (fyStr) => {
+  if (!fyStr || fyStr === 'ALL') return fyStr;
+  let clean = String(fyStr).trim().toUpperCase();
+  clean = clean.replace(/^(F\.Y\.?\s*|FY\s*)/, '');
+  if (clean.match(/^\d{2}-\d{2}$/)) {
+    clean = '20' + clean;
+  }
+  return `F.Y. ${clean}`;
 };
 
 const getFinancialYear = (refStr, dateStr) => {
@@ -50,9 +62,13 @@ const sanitizeForCloud = (dataObj) => {
   if (!cleaned.updatedAt) {
     cleaned.updatedAt = Date.now();
   }
-  if (!cleaned.fy || cleaned.fy === 'ALL' || typeof cleaned.fy === 'undefined') {
-    cleaned.fy = getFinancialYear(cleaned.ref, cleaned.date || cleaned.validDate) || getCurrentFY();
+  
+  if (cleaned.fy && cleaned.fy !== 'ALL') {
+    cleaned.fy = normalizeFY(cleaned.fy);
+  } else {
+    cleaned.fy = normalizeFY(getFinancialYear(cleaned.ref, cleaned.date || cleaned.validDate) || getCurrentFY());
   }
+
   Object.keys(cleaned).forEach(key => {
     if (cleaned[key] === undefined) {
       cleaned[key] = null;
@@ -84,76 +100,58 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const rowsPerPage = 10;
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
-  // 🟢 LOCAL-FIRST INITIALIZATION (Zero wait, instant load)[cite: 12]
+  // --- CLOUD-FIRST & ELECTRON SQLite INITIALIZATION ---
   const [certificates, setCertificates] = useState(() => {
     try {
-      const saved = localStorage.getItem('ERP_History_v104');
-      let allHistory = saved ? JSON.parse(saved) : [];
-      allHistory = allHistory.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-      return allHistory.filter(b => b.docType === 'certificate');
+      const saved = SyncManager.getLocalData('ERP_History_v104', []);
+      return saved.filter(b => b.docType === 'certificate' || b.ref);
     } catch(e) { return []; }
   });
 
-  // 🟢 CONTROLLED BACKGROUND SYNC (Reduces heavy reads & handles multi-device changes)[cite: 12]
+  // 🟢 Fetch fresh data immediately on mount for Electron and Web
   useEffect(() => {
     let isMounted = true;
-
-    const syncWithCloud = async () => {
+    async function initCertificates() {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/data`);
-        if (res.ok && isMounted) {
-          const allData = await res.json();
-          if (allData && typeof allData === 'object') {
-            let cloudCerts = [];
-            if (Array.isArray(allData)) {
-              cloudCerts = allData.filter(item => item.docType === 'certificate');
-            } else if (allData.certificates && Array.isArray(allData.certificates)) {
-              cloudCerts = allData.certificates;
-            } else if (allData.payload) {
-              try {
-                const parsed = JSON.parse(allData.payload);
-                if (parsed.certificates) cloudCerts = parsed.certificates;
-              } catch(e){}
-            }
-
-            if (cloudCerts.length > 0) {
-              cloudCerts = cloudCerts.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-              
-              const localSaved = localStorage.getItem('ERP_History_v104');
-              const localParsed = localSaved ? JSON.parse(localSaved) : [];
-              
-              const currentCertsOnly = localParsed.filter(b => b.docType === 'certificate');
-              if (JSON.stringify(cloudCerts) !== JSON.stringify(currentCertsOnly)) {
-                const others = localParsed.filter(b => b.docType !== 'certificate');
-                const mergedHistory = [...others, ...cloudCerts];
-                setCertificates(cloudCerts);
-                localStorage.setItem('ERP_History_v104', JSON.stringify(mergedHistory));
-              }
-            }
-          }
+        const freshData = await SyncManager.fetchFreshDataIfNeeded('ERP_History_v104', 'certificates');
+        if (isMounted && Array.isArray(freshData)) {
+          const certsOnly = freshData.filter(b => b.docType === 'certificate' || b.ref);
+          setCertificates([...certsOnly]);
         }
       } catch (err) {
-        console.error("Cloud sync background check error:", err);
+        console.error("Init certificate fetch error:", err);
       }
-    };
-
-    syncWithCloud();
+    }
+    initCertificates();
 
     const handleDataUpdate = (e) => {
-      if (!e.detail || e.detail.type === 'certificates') {
-        const saved = localStorage.getItem('ERP_History_v104');
-        if (saved) {
-          let parsedData = JSON.parse(saved);
-          parsedData = parsedData.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-          setCertificates(parsedData.filter(b => b.docType === 'certificate'));
-        }
+      if (!e.detail || e.detail.type === 'certificates' || e.detail.type === 'all') {
+        const saved = SyncManager.getLocalData('ERP_History_v104', []);
+        if (isMounted) setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
       }
     };
     window.addEventListener('ERP_DATA_UPDATED', handleDataUpdate);
+
     return () => {
       isMounted = false;
       window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
     };
+  }, []);
+
+  // --- BACKGROUND UI POLLING TIMER (1 Second Live Refresh) ---
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const saved = SyncManager.getLocalData('ERP_History_v104', []);
+      const certsOnly = saved.filter(b => b.docType === 'certificate' || b.ref);
+      setCertificates(prev => {
+        if (JSON.stringify(prev) !== JSON.stringify(certsOnly)) {
+          return [...certsOnly];
+        }
+        return prev;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
   }, []);
 
   useEffect(() => {
@@ -209,14 +207,14 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFirm, setSelectedFirm] = useState('All Firms');
   const [selectedStatus, setSelectedStatus] = useState('All Status');
-  const [filterFY, setFilterFY] = useState(selectedFY || 'ALL');
+  const [filterFY, setFilterFY] = useState(selectedFY ? normalizeFY(selectedFY) : 'ALL');
 
   const [filterMonth, setFilterMonth] = useState('ALL');
   const [filterYearNum, setFilterYearNum] = useState('ALL');
 
   useEffect(() => {
     if (selectedFY) {
-      setFilterFY(selectedFY);
+      setFilterFY(normalizeFY(selectedFY));
     }
   }, [selectedFY]);
 
@@ -228,60 +226,51 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const [sortConfig, setSortConfig] = useState({ key: 'ref', direction: 'desc' });
 
   const [firms, setFirms] = useState(() => {
-    const saved = localStorage.getItem('ERP_Companies_v104');
-    return saved ? JSON.parse(saved).filter(f => f.type === 'certificate') : [];
+    const saved = SyncManager.getLocalData('ERP_Companies_v104', []);
+    return saved.filter(f => f.type === 'certificate');
   });
 
   const [firmTemplates, setFirmTemplates] = useState(() => {
-    const saved = localStorage.getItem('ERP_FirmTemplates_v104');
-    return saved ? JSON.parse(saved) : {};
+    return SyncManager.getLocalData('ERP_FirmTemplates_v104', {});
   });
 
   const [staffList, setStaffList] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ERP_Staff_v104');
-      return saved ? JSON.parse(saved) : ['NAVNIT', 'KISHOR', 'RAHUL'];
-    } catch(e) {
-      return ['NAVNIT', 'KISHOR', 'RAHUL'];
-    }
+    return SyncManager.getLocalData('ERP_Staff_v104', ['NAVNIT', 'KISHOR', 'RAHUL']);
   });
 
   useEffect(() => {
     const handleStorageChange = () => {
-      const saved = localStorage.getItem('ERP_Staff_v104');
-      if (saved) setStaffList(JSON.parse(saved));
+      const saved = SyncManager.getLocalData('ERP_Staff_v104', []);
+      if (saved.length > 0) setStaffList(saved);
     };
     window.addEventListener('storage', handleStorageChange);
     return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
   const [paymentMethods, setPaymentMethods] = useState(() => {
-    const saved = localStorage.getItem('ERP_PayMethods_v104');
-    return saved ? JSON.parse(saved) : ['CASH', 'ONLINE', 'CHEQUE', 'UPI', 'CREDIT', 'PFMS', 'Bank Transfer'];
+    return SyncManager.getLocalData('ERP_PayMethods_v104', ['CASH', 'ONLINE', 'CHEQUE', 'UPI', 'CREDIT', 'PFMS', 'Bank Transfer']);
   });
 
   const [categories, setCategories] = useState(() => {
-    const saved = localStorage.getItem('ERP_CertCategories_v104');
-    return saved ? JSON.parse(saved) : ["ABC Stored Pressure", "Co2", "Water Co2", "M-Foam", "Dry Chemical Powder", "Dissolved acetylene gas", "Oxygen", "Argon gas"];
+    return SyncManager.getLocalData('ERP_CertCategories_v104', ["ABC Stored Pressure", "Co2", "Water Co2", "M-Foam", "Dry Chemical Powder", "Dissolved acetylene gas", "Oxygen", "Argon gas"]);
   });
 
   const [capacities, setCapacities] = useState(() => {
-    const saved = localStorage.getItem('ERP_CertCapacities_v104');
-    return saved ? JSON.parse(saved) : ["1Kg", "2Kg", "4.5Kg", "6Kg", "9 Ltr Stored PressureType", "50 Ltr", "6 Cubic Meter", "7 Cubic Meter"];
+    return SyncManager.getLocalData('ERP_CertCapacities_v104', ["1Kg", "2Kg", "4.5Kg", "6Kg", "9 Ltr Stored PressureType", "50 Ltr", "6 Cubic Meter", "7 Cubic Meter"]);
   });
 
   useEffect(() => {
-    let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
+    let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
     allHistory = allHistory.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-    const certs = allHistory.filter(c => c.docType === 'certificate');
-    const others = allHistory.filter(c => c.docType !== 'certificate');
+    const certs = allHistory.filter(c => c.docType === 'certificate' || c.ref);
+    const others = allHistory.filter(c => c.docType !== 'certificate' && !c.ref);
     
     let hasDuplicates = false;
     const uniqueCerts = [];
     const seenRefs = new Set();
     
     certs.sort((a, b) => b.id - a.id).forEach(cert => {
-        const calculatedFY = getFinancialYear(cert.ref, cert.date || cert.validDate) || getCurrentFY();
+        const calculatedFY = normalizeFY(cert.fy || getFinancialYear(cert.ref, cert.date || cert.validDate) || getCurrentFY());
         if (!cert.fy || cert.fy === 'ALL' || cert.fy !== calculatedFY) {
           cert.fy = calculatedFY;
           hasDuplicates = true;
@@ -298,12 +287,12 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     if (hasDuplicates) {
         const newHistory = [...others, ...uniqueCerts];
         localStorage.setItem('ERP_History_v104', JSON.stringify(newHistory));
-        setCertificates(uniqueCerts);
+        setCertificates([...uniqueCerts]);
     }
   }, []);
 
-  const availableFYs = Array.from(new Set(certificates.map(c => c.fy || getFinancialYear(c.ref, c.date) || getCurrentFY()).filter(Boolean))).sort().reverse();
-  if (availableFYs.length === 0) availableFYs.push(getCurrentFY());
+  const availableFYs = Array.from(new Set(certificates.map(c => normalizeFY(c.fy || getFinancialYear(c.ref, c.date) || getCurrentFY())).filter(Boolean))).sort().reverse();
+  if (availableFYs.length === 0) availableFYs.push(normalizeFY(getCurrentFY()));
 
   const availableYears = Array.from(new Set(certificates.map(c => {
     const dStr = c.date || c.validDate;
@@ -319,10 +308,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   }).filter(Boolean))).sort().reverse();
 
   const [customers, setCustomers] = useState(() => {
-    try {
-      const saved = localStorage.getItem('ERP_Customers_v104');
-      return saved ? JSON.parse(saved) : [];
-    } catch(e) { return []; }
+    return SyncManager.getLocalData('ERP_Customers_v104', []);
   });
 
   const [editingCertId, setEditingCertId] = useState(null);
@@ -343,10 +329,10 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   useEffect(() => {
     if (!editingCertId && viewMode === 'create') {
-      const savedFirms = JSON.parse(localStorage.getItem('ERP_Companies_v104') || '[]').filter(f => f.type === 'certificate');
+      const savedFirms = SyncManager.getLocalData('ERP_Companies_v104', []).filter(f => f.type === 'certificate');
       const activeId = formData.activeFirmId || (savedFirms.length > 0 ? savedFirms[0].id : '');
       const f = savedFirms.find(x => x.id === activeId);
-      const allHist = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]').filter(b => b.docType === 'certificate');
+      const allHist = SyncManager.getLocalData('ERP_History_v104', []).filter(b => b.docType === 'certificate' || b.ref);
 
       if (f) {
         const firmCerts = allHist.filter(c => c.vendor === f.name);
@@ -475,28 +461,15 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   const toggleSingleReminderStatus = async (e, id, statusVal) => {
     e.stopPropagation();
-    let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-    const idx = allHistory.findIndex(h => h.id === id);
+    let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
+    const idx = allHistory.findIndex(h => String(h.id) === String(id));
     if(idx !== -1) {
        allHistory[idx].reminderDone = statusVal;
        allHistory[idx].updatedAt = Date.now();
-       localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
-       setCertificates(allHistory.filter(b => b.docType === 'certificate'));
-       try {
-         const sanitized = sanitizeForCloud(allHistory[idx]);
-         await fetch(`${BACKEND_URL}/api/data`, {
-           method: 'POST',
-           headers: { 'Content-Type': 'application/json' },
-           body: JSON.stringify({ type: 'certificates', id: String(id), data: sanitized })
-         });
-         localStorage.removeItem(`shaney_certificate_${id}`);
-         if (window.require) {
-           const { ipcRenderer } = window.require('electron');
-           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
-         }
-       } catch (err) {
-         console.error("AWS reminder status update error:", err);
-       }
+       await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+       
+       const saved = SyncManager.getLocalData('ERP_History_v104', []);
+       setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
     }
   };
 
@@ -518,29 +491,16 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   const handleWhatsAppSend = async (e, cert, type = 'doc') => {
     e.stopPropagation(); 
-    const allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-    const idx = allHistory.findIndex(c => c.id === cert.id);
+    let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
+    const idx = allHistory.findIndex(c => String(c.id) === String(cert.id));
     
     if (idx !== -1 && type === 'doc') {
       allHistory[idx].whatsappSent = true;
       allHistory[idx].updatedAt = Date.now();
-      localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
-      setCertificates(allHistory.filter(b => b.docType === 'certificate'));
-      try {
-        const sanitized = sanitizeForCloud(allHistory[idx]);
-        await fetch(`${BACKEND_URL}/api/data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'certificates', id: String(cert.id), data: sanitized })
-        });
-        localStorage.removeItem(`shaney_certificate_${cert.id}`);
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
-        }
-      } catch (err) {
-        console.error("AWS whatsapp sent update error:", err);
-      }
+      await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+      
+      const saved = SyncManager.getLocalData('ERP_History_v104', []);
+      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
     }
 
     const cData = customers.find(c => c.name.toLowerCase() === cert.party.toLowerCase());
@@ -691,22 +651,10 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const handleDeleteHistory = async (e, id) => {
     e.stopPropagation();
     if(confirm('Are you sure you want to delete this record?')) {
-      let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-      allHistory = allHistory.filter(c => c.id !== id);
-      localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
-      setCertificates(allHistory.filter(b => b.docType === 'certificate'));
-      setSelectedCertIds(selectedCertIds.filter(i => i !== id));
-
-      try {
-        await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
-        localStorage.removeItem(`shaney_certificate_${id}`);
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id, deleted: true, updatedAt: Date.now() });
-        }
-      } catch (err) {
-        console.error("AWS delete certificate error:", err);
-      }
+      await SyncManager.deleteData('ERP_History_v104', 'certificates', id);
+      const saved = SyncManager.getLocalData('ERP_History_v104', []);
+      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+      setSelectedCertIds(selectedCertIds.filter(i => String(i) !== String(id)));
     }
   };
 
@@ -723,7 +671,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     if (e.target.checked) {
       setSelectedCertIds([...selectedCertIds, id]);
     } else {
-      setSelectedCertIds(selectedCertIds.filter(item => item !== id));
+      setSelectedCertIds(selectedCertIds.filter(item => String(item) !== String(id)));
     }
   };
 
@@ -733,59 +681,41 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       return;
     }
     if (confirm(`Are you sure you want to delete ${selectedCertIds.length} selected certificate(s)?`)) {
-      let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-      allHistory = allHistory.filter(c => !selectedCertIds.includes(c.id));
-      localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
-      setCertificates(allHistory.filter(b => b.docType === 'certificate'));
-      
       for (let id of selectedCertIds) {
-        try { 
-          await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
-          localStorage.removeItem(`shaney_certificate_${id}`);
-        } catch(e){}
+        await SyncManager.deleteData('ERP_History_v104', 'certificates', id);
       }
-
+      const saved = SyncManager.getLocalData('ERP_History_v104', []);
+      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
       setSelectedCertIds([]);
     }
   };
 
   const handleStatusChange = async (e, id, newStatus) => {
     e.stopPropagation();
-    let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-    const idx = allHistory.findIndex(c => c.id === id);
+    
+    setCertificates(prevCerts => 
+      prevCerts.map(c => String(c.id) === String(id) ? { ...c, workStatus: newStatus, updatedAt: Date.now() } : c)
+    );
+
+    let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
+    const idx = allHistory.findIndex(c => String(c.id) === String(id));
     if (idx !== -1) {
       allHistory[idx].workStatus = newStatus;
       allHistory[idx].updatedAt = Date.now();
-      localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
-      setCertificates(allHistory.filter(b => b.docType === 'certificate'));
-      try {
-        const sanitized = sanitizeForCloud(allHistory[idx]);
-        await fetch(`${BACKEND_URL}/api/data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'certificates', id: String(id), data: sanitized })
-        });
-        localStorage.removeItem(`shaney_certificate_${id}`);
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
-        }
-      } catch (err) {
-        console.error("AWS work status update error:", err);
-      }
+      await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+      
+      const saved = SyncManager.getLocalData('ERP_History_v104', []);
+      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
     }
   };
 
   const syncCustomerToDirectory = async (partyName, phoneNum, addressStr) => {
     if (!partyName) return;
     try {
-      let savedCusts = localStorage.getItem('ERP_Customers_v104');
-      let customersList = savedCusts ? JSON.parse(savedCusts) : [];
-      
+      let customersList = SyncManager.getLocalData('ERP_Customers_v104', []);
       const cleanName = String(partyName).trim().toLowerCase();
       const existing = customersList.find(c => c.name && c.name.trim().toLowerCase() === cleanName);
       
-      const currentTimestamp = Date.now();
       if (!existing) {
         const newCustObj = {
           id: 'cust_cert_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
@@ -797,7 +727,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           district: '',
           state: 'Gujarat',
           pincode: '',
-          updatedAt: currentTimestamp,
+          updatedAt: Date.now(),
           contacts: [
             {
               person: '',
@@ -808,19 +738,8 @@ export default function Certificate({ selectedFY, initialViewMode }) {
             }
           ]
         };
-        customersList.push(newCustObj);
-        localStorage.setItem('ERP_Customers_v104', JSON.stringify(customersList));
-        setCustomers(customersList);
-
-        await fetch(`${BACKEND_URL}/api/data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'customers', id: String(newCustObj.id), data: newCustObj })
-        });
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', newCustObj);
-        }
+        await SyncManager.saveData('ERP_Customers_v104', 'customers', newCustObj);
+        setCustomers(SyncManager.getLocalData('ERP_Customers_v104', []));
       }
     } catch (err) {
       console.error("Error auto-syncing customer to directory:", err);
@@ -834,16 +753,16 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       return;
     }
     
-    let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
+    let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
     
     if (editingCertId) {
-      const isDuplicate = allHistory.some(c => c.docType === 'certificate' && c.vendor === activeFirmObj.name && c.ref === formData.serialNo && c.id !== editingCertId);
+      const isDuplicate = allHistory.some(c => (c.docType === 'certificate' || c.ref) && c.vendor === activeFirmObj.name && c.ref === formData.serialNo && String(c.id) !== String(editingCertId));
       if (isDuplicate) {
           alert(`⚠️ Certificate No. ${formData.serialNo} already exists! Please use a unique number.`);
           return;
       }
     } else {
-      const isDuplicate = allHistory.some(c => c.docType === 'certificate' && c.vendor === activeFirmObj.name && c.ref === formData.serialNo);
+      const isDuplicate = allHistory.some(c => (c.docType === 'certificate' || c.ref) && c.vendor === activeFirmObj.name && c.ref === formData.serialNo);
       if (isDuplicate) {
           alert(`⚠️ Certificate No. ${formData.serialNo} already exists! Please use a unique number.`);
           return;
@@ -852,18 +771,17 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
     const savedRefillDate = toDDMMYYYY(formData.refillDate);
     const savedValidUpTo = toDDMMYYYY(formData.validUpTo);
-    const autoFy = getFinancialYear(formData.serialNo, savedRefillDate) || getCurrentFY();
+    const autoFy = normalizeFY(getFinancialYear(formData.serialNo, savedRefillDate) || getCurrentFY());
     const isCredit = formData.payMethod.toLowerCase() === 'credit';
     
     const initialPaymentAmount = isCredit ? 0 : Number(formData.amount);
     const initialPayments = initialPaymentAmount > 0 ? [{ id: Date.now() + 1, amount: initialPaymentAmount, method: formData.payMethod, note: 'Initial payment on generation', date: toDDMMYYYY(getTodayISO()) }] : [];
     
-    let targetCertId = editingCertId;
-    const currentTimestamp = Date.now();
+    let targetCertId = editingCertId || Date.now().toString();
     let recordPayload = null;
 
     if (editingCertId) {
-      const idx = allHistory.findIndex(x => x.id === editingCertId);
+      const idx = allHistory.findIndex(x => String(x.id) === String(editingCertId));
       if(idx !== -1) {
         recordPayload = sanitizeForCloud({
           ...allHistory[idx],
@@ -879,12 +797,10 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           confirmName: formData.confirmBy,
           collectedName: formData.collectedBy,
           itemsData: JSON.stringify(tableData),
-          updatedAt: currentTimestamp
+          updatedAt: Date.now()
         });
-        allHistory[idx] = recordPayload;
       }
     } else {
-      targetCertId = Date.now().toString();
       recordPayload = sanitizeForCloud({
         id: targetCertId,
         docType: 'certificate',
@@ -904,40 +820,15 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         collectedName: formData.collectedBy,
         itemsData: JSON.stringify(tableData),
         payments: initialPayments,
-        updatedAt: currentTimestamp
+        updatedAt: Date.now()
       });
-      allHistory.push(recordPayload);
     }
 
-    localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
-    setCertificates(allHistory.filter(b => b.docType === 'certificate'));
+    await SyncManager.saveData('ERP_History_v104', 'certificates', recordPayload);
+    const updatedHistory = SyncManager.getLocalData('ERP_History_v104', []);
+    setCertificates([...updatedHistory.filter(b => b.docType === 'certificate' || b.ref)]);
 
     await syncCustomerToDirectory(formData.client, '', formData.address);
-    
-    try {
-      if (window.require) {
-        const { ipcRenderer } = window.require('electron');
-        if (ipcRenderer && recordPayload) {
-          await ipcRenderer.invoke('sqlite-save-record', recordPayload);
-        }
-      }
-    } catch (err) {
-      console.error("SQLite local save error:", err);
-    }
-
-    try {
-      await fetch(`${BACKEND_URL}/api/data`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'certificates', id: String(targetCertId), data: recordPayload })
-      });
-    } catch (err) {
-      console.error("AWS background save error:", err);
-    }
-
-    if (targetCertId) {
-      localStorage.removeItem(`shaney_certificate_${targetCertId}`);
-    }
 
     const finishSave = () => {
       const defaultItems = categories.reduce((acc, cat) => ({ ...acc, [cat]: [{ cap: "", qty: "" }] }), {});
@@ -965,8 +856,8 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const handleAddPaymentEntry = async (e) => {
     e.preventDefault();
     if (!paymentForm.amount || Number(paymentForm.amount) <= 0) return;
-    const allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-    const idx = allHistory.findIndex(c => c.id === activeCert.id);
+    let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
+    const idx = allHistory.findIndex(c => String(c.id) === String(activeCert.id));
     if (idx !== -1) {
       const newPayment = { id: Date.now(), amount: Number(paymentForm.amount), method: paymentForm.method, note: paymentForm.note, date: toDDMMYYYY(getTodayISO()) };
       if (!allHistory[idx].payments) allHistory[idx].payments = [];
@@ -978,37 +869,21 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         allHistory[idx].payment = paymentForm.method;
       }
 
-      localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
-      setCertificates(allHistory.filter(b => b.docType === 'certificate'));
+      await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+      const saved = SyncManager.getLocalData('ERP_History_v104', []);
+      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
       setActiveCert(allHistory[idx]);
       setPaymentForm({ amount: '', method: paymentMethods[0] || 'CASH', note: '' });
-      
-      try {
-        const sanitized = sanitizeForCloud(allHistory[idx]);
-        await fetch(`${BACKEND_URL}/api/data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'certificates', id: String(activeCert.id), data: sanitized })
-        });
-        localStorage.removeItem(`shaney_certificate_${activeCert.id}`);
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
-        }
-      } catch (err) {
-        console.error("AWS payment add error:", err);
-      }
-
       alert('✅ Payment Added & Updated!');
     }
   };
 
   const handleDeletePayment = async (paymentId) => {
     if(confirm('Are you sure you want to delete this payment receipt?')) {
-      const allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-      const idx = allHistory.findIndex(c => c.id === activeCert.id);
+      let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
+      const idx = allHistory.findIndex(c => String(c.id) === String(activeCert.id));
       if (idx !== -1) {
-        const updatedPayments = allHistory[idx].payments.filter(p => p.id !== paymentId);
+        const updatedPayments = allHistory[idx].payments.filter(p => String(p.id) !== String(paymentId));
         allHistory[idx].payments = updatedPayments;
         allHistory[idx].updatedAt = Date.now();
         
@@ -1017,26 +892,10 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           allHistory[idx].payment = 'CREDIT';
         }
 
-        localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
-        setCertificates(allHistory.filter(b => b.docType === 'certificate'));
+        await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+        const saved = SyncManager.getLocalData('ERP_History_v104', []);
+        setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
         setActiveCert(allHistory[idx]);
-        
-        try {
-          const sanitized = sanitizeForCloud(allHistory[idx]);
-          await fetch(`${BACKEND_URL}/api/data`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ type: 'certificates', id: String(activeCert.id), data: sanitized })
-          });
-          localStorage.removeItem(`shaney_certificate_${activeCert.id}`);
-          if (window.require) {
-            const { ipcRenderer } = window.require('electron');
-            if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', allHistory[idx]);
-          }
-        } catch (err) {
-          console.error("AWS payment delete error:", err);
-        }
-
         alert('🗑️ Payment Receipt Deleted & Credit Updated!');
       }
     }
@@ -1055,7 +914,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     const matchesFirm = selectedFirm === 'All Firms' || c.vendor === selectedFirm;
     const matchesStatus = selectedStatus === 'All Status' || c.workStatus === selectedStatus;
     
-    const rowFY = getFinancialYear(c.ref, c.date || c.validDate) || getCurrentFY();
+    const rowFY = normalizeFY(c.fy || getFinancialYear(c.ref, c.date || c.validDate) || getCurrentFY());
     const matchesFY = filterFY === 'ALL' || rowFY === filterFY || rowFY.includes(filterFY);
 
     const dStr = c.date || c.validDate;
@@ -1600,10 +1459,9 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         {viewMode === 'list' && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             
-            {/* 🟢 UPDATED RESPONSIVE TOOLBAR (1st row jaisi same width ke sath) */}
+            {/* TOOLBAR */}
             <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3 mb-4">
               
-              {/* ROW 1: Title, Summary, Years, Months, Search */}
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
                   <h2 className="flex items-center gap-2 text-sm font-black uppercase text-slate-800 tracking-wider">
@@ -1638,19 +1496,18 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                 </div>
               </div>
 
-              {/* ROW 2: Balanced Dropdowns (1st row matching) & Action Buttons */}
               <div className="grid grid-cols-1 sm:flex sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
-                <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:flex-1 sm:max-w-[32%]">
+                <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:w-[150px]">
                   <option value="All Firms">All Firms</option>
                   {firms.map(f => <option key={f.id} value={f.name}>{f.name}</option>)}
                 </select>
 
-                <select value={filterFY} onChange={(e) => setFilterFY(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:flex-1 sm:max-w-[32%]">
+                <select value={filterFY} onChange={(e) => setFilterFY(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:w-[110px]">
                   <option value="ALL">All F.Y.</option>
                   {availableFYs.map(fy => <option key={fy} value={fy}>{fy}</option>)}
                 </select>
 
-                <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:flex-1 sm:max-w-[24%]">
+                <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} className="pro-input py-2 px-2 text-xs shadow-sm font-bold text-slate-700 cursor-pointer bg-white sm:w-[120px]">
                   <option value="All Status">All Status</option>
                   <option value="New">🔵 New</option>
                   <option value="Pending">🔴 Pending</option>

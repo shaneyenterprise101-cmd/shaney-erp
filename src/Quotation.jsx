@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import { toJpeg } from 'html-to-image';
+import { SyncManager } from './SyncManager';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
@@ -48,6 +49,17 @@ const getCurrentFY = () => {
   return m >= 4 ? `F.Y. ${y}-${String(y + 1).slice(-2)}` : `F.Y. ${y - 1}-${String(y).slice(-2)}`;
 };
 
+// --- ROBUST FY NORMALIZER ---
+const normalizeFY = (fyStr) => {
+  if (!fyStr || fyStr === 'ALL') return fyStr;
+  let clean = String(fyStr).trim().toUpperCase();
+  clean = clean.replace(/^(F\.Y\.?\s*|FY\s*)/, '');
+  if (clean.match(/^\d{2}-\d{2}$/)) {
+    clean = '20' + clean;
+  }
+  return `F.Y. ${clean}`;
+};
+
 const getFinancialYear = (dateStr) => {
   if (!dateStr) return getCurrentFY();
   const parts = dateStr.split('-');
@@ -74,12 +86,19 @@ const getDynamicPrefix = () => {
   return `QT/${yr1}-${yr2}/101`;
 };
 
-// 🟢 BULLETPROOF DATA SANITIZER WITH TIMESTAMP FALLBACK
+// --- DATA SANITIZER ---
 const sanitizeForCloud = (dataObj) => {
   let cleaned = { ...dataObj };
   if (!cleaned.updatedAt) {
-    cleaned.updatedAt = Date.now(); // 🟢 Timestamp fallback
+    cleaned.updatedAt = Date.now();
   }
+  
+  if (cleaned.fy && cleaned.fy !== 'ALL') {
+    cleaned.fy = normalizeFY(cleaned.fy);
+  } else {
+    cleaned.fy = normalizeFY(getFinancialYear(cleaned.date) || getCurrentFY());
+  }
+
   Object.keys(cleaned).forEach(key => {
     if (cleaned[key] === undefined) {
       cleaned[key] = null;
@@ -88,7 +107,7 @@ const sanitizeForCloud = (dataObj) => {
   return cleaned;
 };
 
-// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
+// --- UNIVERSAL LOGGING HELPER ---
 const logActionToBackend = async (actionText) => {
   try {
     const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
@@ -215,10 +234,10 @@ export default function Quotation({ selectedFY, initialViewMode }) {
   const rowsPerPage = 10;
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
-  // 🟢 REAL-TIME LIVE SYNC LISTENER (App.jsx broadcast catcher)
+  // 🟢 REAL-TIME LIVE SYNC LISTENER (Fixed with 'all' trigger support)
   useEffect(() => {
     const handleDataUpdate = (e) => {
-      if (!e.detail || e.detail.type === 'quotations') {
+      if (!e.detail || e.detail.type === 'quotations' || e.detail.type === 'all') {
         const saved = localStorage.getItem('ERP_History_v104');
         if (saved) {
           let parsedData = JSON.parse(saved);
@@ -272,7 +291,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     return parsedData.filter(b => b.docType === 'quotation');
   });
 
-  // 🟢 Fetch quotations from AWS Cloud on load
+  // 🟢 Fetch quotations from Cloud on load
   useEffect(() => {
     const fetchCloudQuotations = async () => {
       try {
@@ -310,20 +329,20 @@ export default function Quotation({ selectedFY, initialViewMode }) {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedFirmFilter, setSelectedFirmFilter] = useState('ALL');
-  const [filterFY, setFilterFY] = useState(selectedFY || 'ALL');
+  const [filterFY, setFilterFY] = useState(selectedFY ? normalizeFY(selectedFY) : 'ALL');
   const [selectedQuoteIds, setSelectedQuoteIds] = useState([]);
   const [sortConfig, setSortConfig] = useState({ key: 'ref', direction: 'desc' });
 
   useEffect(() => {
-    if (selectedFY) setFilterFY(selectedFY);
+    if (selectedFY) setFilterFY(normalizeFY(selectedFY));
   }, [selectedFY]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, selectedFirmFilter, filterFY]);
 
-  const availableFYs = Array.from(new Set(quotations.map(c => c.fy).filter(Boolean)));
-  if (availableFYs.length === 0) availableFYs.push(getCurrentFY());
+  const availableFYs = Array.from(new Set(quotations.map(c => normalizeFY(c.fy)).filter(Boolean))).sort().reverse();
+  if (availableFYs.length === 0) availableFYs.push(normalizeFY(getCurrentFY()));
 
   const [editingQuoteId, setEditingQuoteId] = useState(null);
   const [formData, setFormData] = useState({
@@ -409,7 +428,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     }
   }, [formData.activeFirmId, editingQuoteId, viewMode, firms, products]);
 
-  // 🟢 Firm change hone par ya products load hone par items ke rates active firm ke mutabiq update karne ke liye
   useEffect(() => {
     if (viewMode === 'create' && products.length > 0) {
       const firmGst = activeFirmObj.gstRate !== undefined ? Number(activeFirmObj.gstRate) : 18;
@@ -536,7 +554,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     }
 
     const savedDate = toDDMMYYYY(formData.issueDate);
-    const autoFy = getFinancialYear(savedDate);
+    const autoFy = normalizeFY(getFinancialYear(savedDate));
     
     let targetQuoteId = editingQuoteId || Date.now().toString();
     const currentTimestamp = Date.now();
@@ -814,7 +832,8 @@ export default function Quotation({ selectedFY, initialViewMode }) {
   const filteredQuotes = quotations.filter(c => {
     const matchesSearch = (c.ref || '').toLowerCase().includes(searchTerm.toLowerCase()) || (c.party || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFirm = selectedFirmFilter === 'ALL' || c.vendor === selectedFirmFilter;
-    const matchesFY = filterFY === 'ALL' || !c.fy || c.fy === filterFY;
+    const rowFY = normalizeFY(c.fy || getFinancialYear(c.date) || getCurrentFY());
+    const matchesFY = filterFY === 'ALL' || rowFY === filterFY || rowFY.includes(filterFY);
     return matchesSearch && matchesFirm && matchesFY;
   }).sort((a, b) => {
     let aVal = a[sortConfig.key] || ''; let bVal = b[sortConfig.key] || '';
@@ -1290,7 +1309,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                                         <span>{q.party}</span>
                                         {q.whatsappSent && (
                                             <span className="text-emerald-500 inline-flex items-center" title="WhatsApp Sent">
-                                                <svg className="w-4 h-4 fill-current inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                                                <svg className="w-4 h-4 fill-current inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                                             </span>
                                         )}
                                     </div>
@@ -1308,7 +1327,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                                             <svg className="w-3.5 h-3.5 fill-current inline" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg> EDIT
                                         </button>
                                         <button onClick={(e) => handleWhatsAppSend(e, q)} className="flex items-center gap-1 bg-[#25D366] hover:bg-green-600 text-white px-2.5 py-1.5 rounded transition-colors shadow-sm font-bold text-[10px]" title="Send WhatsApp">
-                                            <svg className="w-3.5 h-3.5 fill-current inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg> WA
+                                            <svg className="w-3.5 h-3.5 fill-current inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg> WA
                                         </button>
                                         <button onClick={(e) => handleDeleteHistory(e, q.id)} className="flex items-center gap-1 text-slate-600 hover:text-red-600 bg-white hover:bg-red-50 border border-slate-200 px-2 py-1.5 rounded transition-colors shadow-sm font-bold" title="Delete">
                                             <svg className="w-3.5 h-3.5 fill-current inline" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg> DEL

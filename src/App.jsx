@@ -24,6 +24,17 @@ const getCurrentFY = () => {
   return m >= 4 ? `F.Y. ${y}-${String(y + 1).slice(-2)}` : `F.Y. ${y - 1}-${String(y).slice(-2)}`;
 };
 
+// 🟢 Robust Normalizer for Financial Year to prevent duplicates
+const normalizeFY = (fyStr) => {
+  if (!fyStr || fyStr === 'ALL') return fyStr;
+  let clean = String(fyStr).trim().toUpperCase();
+  clean = clean.replace(/^(F\.Y\.?\s*|FY\s*)/, '');
+  if (clean.match(/^\d{2}-\d{2}$/)) {
+    clean = '20' + clean;
+  }
+  return `F.Y. ${clean}`;
+};
+
 export default function App() {
   const path = window.location.pathname;
   const isPreviewRoute = path.includes('/preview/');
@@ -32,41 +43,60 @@ export default function App() {
   const [previewDocData, setPreviewDocData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(isPreviewRoute);
 
-  // 🟢 Optimized Background Auto Delta Sync Worker (Fixed plural/singular mismatch)
+  // 🟢 Optimized Background Auto Delta Sync Worker with Cross-Device Broadcast
   useEffect(() => {
     const runRealtimeSync = async () => {
       try {
-        if (!window.require) return;
-        const { ipcRenderer } = window.require('electron');
-        if (!ipcRenderer) return;
+        // 1. Electron SQLite delta sync agar available ho
+        if (window.require) {
+          const { ipcRenderer } = window.require('electron');
+          if (ipcRenderer) {
+            const lastSync = Number(localStorage.getItem('ERP_Last_Sync_Timestamp') || 0);
+            const deltaRecords = await ipcRenderer.invoke('sqlite-get-delta-records', lastSync);
+            for (let rec of deltaRecords) {
+               let correctType = rec.docType || 'certificates';
+               if (correctType === 'certificate') correctType = 'certificates';
+               if (correctType === 'quotation') correctType = 'quotations';
+               if (correctType === 'customer') correctType = 'customers';
+               if (correctType === 'product') correctType = 'products';
 
-        const lastSync = Number(localStorage.getItem('ERP_Last_Sync_Timestamp') || 0);
-        
-        // 1. Push local new/updated records to Render Backend with correct plural types
-        const deltaRecords = await ipcRenderer.invoke('sqlite-get-delta-records', lastSync);
-        for (let rec of deltaRecords) {
-           let correctType = rec.docType || 'certificates';
-           if (correctType === 'certificate') correctType = 'certificates';
-           if (correctType === 'quotation') correctType = 'quotations';
-           if (correctType === 'customer') correctType = 'customers';
-           if (correctType === 'product') correctType = 'products';
-
-           await fetch(`${BACKEND_URL}/api/data`, {
-             method: 'POST',
-             headers: { 'Content-Type': 'application/json' },
-             body: JSON.stringify({ type: correctType, id: String(rec.id), data: rec })
-           });
+               await fetch(`${BACKEND_URL}/api/data`, {
+                 method: 'POST',
+                 headers: { 'Content-Type': 'application/json' },
+                 body: JSON.stringify({ type: correctType, id: String(rec.id), data: rec })
+               });
+            }
+          }
         }
 
-        // 2. Pull new changes from Render Backend
+        // 2. Cloud se fresh data fetch karke local storage aur window events update karna
         const res = await fetch(`${BACKEND_URL}/api/data`);
         if (res.ok) {
           const allData = await res.json();
-          if (Array.isArray(allData)) {
+          if (Array.isArray(allData) && allData.length > 0) {
+            let history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
+            let hasChanged = false;
+
             for (let cloudData of allData) {
-              if (cloudData.updatedAt && cloudData.updatedAt > lastSync) {
-                await ipcRenderer.invoke('sqlite-save-record', cloudData);
+              const idx = history.findIndex(h => String(h.id) === String(cloudData.id));
+              if (idx === -1 || (cloudData.updatedAt && cloudData.updatedAt > (history[idx].updatedAt || 0))) {
+                if (idx === -1) {
+                  history.push(cloudData);
+                } else {
+                  history[idx] = cloudData;
+                }
+                hasChanged = true;
+
+                if (window.require) {
+                  const { ipcRenderer } = window.require('electron');
+                  if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', cloudData);
+                }
               }
+            }
+
+            if (hasChanged) {
+              localStorage.setItem('ERP_History_v104', JSON.stringify(history));
+              window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'all' } }));
             }
           }
         }
@@ -78,7 +108,7 @@ export default function App() {
     };
 
     runRealtimeSync();
-    const syncInterval = setInterval(runRealtimeSync, 10000); 
+    const syncInterval = setInterval(runRealtimeSync, 8000); // Har 8 seconds par live sync check
     return () => clearInterval(syncInterval);
   }, []);
 
@@ -149,8 +179,18 @@ export default function App() {
   
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
+  // 🟢 Fixed FY States & Initial Modes with Normalized Unique Values
   const [selectedFY, setSelectedFY] = useState(getCurrentFY());
-  const [availableFYs, setAvailableFYs] = useState([]);
+  const [availableFYs, setAvailableFYs] = useState(() => {
+    try {
+      const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
+      const historyFYs = history.map(item => normalizeFY(item.fy)).filter(Boolean);
+      const currentFY = normalizeFY(getCurrentFY());
+      return Array.from(new Set([...historyFYs, currentFY])).filter(Boolean).sort().reverse();
+    } catch(e) {
+      return [normalizeFY(getCurrentFY())];
+    }
+  });
 
   const [certInitialMode, setCertInitialMode] = useState('list');
   const [quoteInitialMode, setQuoteInitialMode] = useState('list');
@@ -293,11 +333,13 @@ export default function App() {
   });
 
   useEffect(() => {
-    const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-    const historyFYs = history.map(item => item.fy).filter(Boolean);
-    const currentFY = getCurrentFY();
-    const uniqueFYs = Array.from(new Set([...historyFYs, currentFY])).sort().reverse();
-    setAvailableFYs(uniqueFYs);
+    try {
+      const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
+      const historyFYs = history.map(item => normalizeFY(item.fy)).filter(Boolean);
+      const currentFY = normalizeFY(getCurrentFY());
+      const uniqueFYs = Array.from(new Set([...historyFYs, currentFY])).filter(Boolean).sort().reverse();
+      setAvailableFYs(uniqueFYs);
+    } catch(e) {}
   }, []);
 
   useEffect(() => {
