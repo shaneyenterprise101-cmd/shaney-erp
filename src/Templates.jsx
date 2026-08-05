@@ -269,7 +269,6 @@ export default function Templates() {
     }
   }, [currentDesign, selectedFirmId, designMode]);
 
-  // 🟢 100% WORKING & CLEAN CLOUD SYNC FOR TEMPLATES
   const handleSaveTemplateToCloud = async () => {
     if (!selectedFirmId) return;
     const currentTimestamp = Date.now();
@@ -277,9 +276,12 @@ export default function Templates() {
     try {
       alert(`⏳ Saving template for "${activeFirmObj.name}" to cloud... Please wait.`);
 
-      const lightDesign = { ...currentDesign };
-      const graphicsData = lightDesign.graphics || {};
-      lightDesign.graphics = {};
+      // Keep currentDesign.graphics safe for local UI, create a stripped copy for cloud backend
+      const graphicsData = currentDesign.graphics || {};
+      const lightDesign = { 
+        ...currentDesign, 
+        graphics: {} 
+      };
 
       const basePayload = {
         id: String(templateKey),
@@ -290,7 +292,7 @@ export default function Templates() {
         updatedAt: currentTimestamp
       };
 
-      // 1. Save Core Settings to Backend
+      // 1. Save Core Settings to Backend (without heavy graphics in main payload)
       const res1 = await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -327,7 +329,7 @@ export default function Templates() {
         }
       }
 
-      // 3. Local Storage Update
+      // 3. Local Storage & State Update (KEEPING full currentDesign with graphics so UI doesn't lose them)
       const updatedTemplates = { ...firmTemplates, [templateKey]: currentDesign };
       setFirmTemplates(updatedTemplates);
       localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updatedTemplates));
@@ -336,7 +338,7 @@ export default function Templates() {
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) {
-          await ipcRenderer.invoke('sqlite-save-record', basePayload);
+          await ipcRenderer.invoke('sqlite-save-record', { ...basePayload, graphics: graphicsData });
         }
       }
 
