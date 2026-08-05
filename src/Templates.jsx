@@ -402,19 +402,55 @@ export default function Templates() {
     }
   };
 
-  const handleGraphicFile = (key, file) => {
+  // 🟢 COMPRESSION UTILITY TO PREVENT 413 PAYLOAD ERRORS
+  const compressAndConvertToBase64 = (file, maxWidth = 600, maxHeight = 600, quality = 0.7) => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > maxWidth) {
+              height *= maxWidth / width;
+              width = maxWidth;
+            }
+          } else {
+            if (height > maxHeight) {
+              width *= maxHeight / height;
+              height = maxHeight;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        };
+        img.src = uploadEvent.target.result;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleGraphicFile = async (key, file) => {
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
+    try {
+      const compressedDataUrl = await compressAndConvertToBase64(file, 500, 500, 0.7);
       setCurrentDesign(prev => ({
         ...prev,
         graphics: {
           ...(prev.graphics || {}),
-          [key]: { ...(prev.graphics?.[key] || { x: 0, y: 0, size: 100 }), url: uploadEvent.target.result }
+          [key]: { ...(prev.graphics?.[key] || { x: 0, y: 0, size: 100 }), url: compressedDataUrl }
         }
       }));
-    };
-    reader.readAsDataURL(file);
+    } catch (err) {
+      console.error("Image compression error:", err);
+    }
   };
 
   const removeGraphic = (key) => {
@@ -437,14 +473,15 @@ export default function Templates() {
     }));
   };
 
-  const handleBgFile = (e) => {
+  const handleBgFile = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      setCurrentDesign(prev => ({ ...prev, a4BgUrl: uploadEvent.target.result }));
-    };
-    reader.readAsDataURL(file);
+    try {
+      const compressedDataUrl = await compressAndConvertToBase64(file, 800, 1100, 0.75);
+      setCurrentDesign(prev => ({ ...prev, a4BgUrl: compressedDataUrl }));
+    } catch (err) {
+      console.error("Background compression error:", err);
+    }
   };
 
   // 🟢 DRAG & DROP INTERACTION STATES FOR PREVIEW
