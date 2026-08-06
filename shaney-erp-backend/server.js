@@ -239,22 +239,30 @@ app.get('/preview/:id', async (req, res) => {
         if (isCert) {
             // --- CERTIFICATE A4 EXACT HTML RENDERER ---
             let tableRowsHTML = '';
-            if (items && items.items) {
-                Object.entries(items.items).forEach(([cat, rows]) => {
-                    const validRows = (rows || []).filter(r => r.cap || r.qty);
-                    if (validRows.length > 0) {
-                        const capStr = validRows.map(r => r.cap).filter(Boolean).join(', ');
-                        const qtyStr = validRows.map(r => r.qty).filter(Boolean).join(' + ');
-                        tableRowsHTML += `
-                            <tr>
-                                <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:500;">${cat}</td>
-                                <td style="padding:6px 10px; border:1px solid #000; font-weight:bold;">${capStr}</td>
-                                <td style="padding:6px 10px; border:1px solid #000; font-weight:bold;">${qtyStr}</td>
-                            </tr>
-                        `;
-                    }
-                });
-            }
+            const defaultCategories = ["ABC Stored Pressure", "Co2", "Water Co2", "M-Foam", "Dry Chemical Powder", "Dissolved acetylene gas", "Oxygen", "Argon gas"];
+            
+            defaultCategories.forEach(cat => {
+                const rows = items && items.items && items.items[cat] ? items.items[cat].filter(r => r.cap || r.qty) : [];
+                if (rows.length > 0) {
+                    const capStr = rows.map(r => r.cap).filter(Boolean).join(', ');
+                    const qtyStr = rows.map(r => r.qty).filter(Boolean).join(' + ');
+                    tableRowsHTML += `
+                        <tr>
+                            <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:500;">${cat}</td>
+                            <td style="padding:6px 10px; border:1px solid #000; font-weight:bold;">${capStr}</td>
+                            <td style="padding:6px 10px; border:1px solid #000; font-weight:bold;">${qtyStr}</td>
+                        </tr>
+                    `;
+                } else {
+                    tableRowsHTML += `
+                        <tr>
+                            <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:500;">${cat}</td>
+                            <td style="padding:6px 10px; border:1px solid #000;"></td>
+                            <td style="padding:6px 10px; border:1px solid #000;"></td>
+                        </tr>
+                    `;
+                }
+            });
 
             return res.send(`
                 <!DOCTYPE html>
