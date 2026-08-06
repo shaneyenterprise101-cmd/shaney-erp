@@ -204,7 +204,7 @@ app.get('/api/document/:id', async (req, res) => {
     }
 });
 
-// 🟢 Public HTML Preview Route for WhatsApp Links (Direct Browser Rendering)
+// 🟢 Exact-Match Professional A4 Preview Route for WhatsApp Links
 app.get('/preview/:id', async (req, res) => {
     try {
         const docId = req.params.id;
@@ -234,70 +234,242 @@ app.get('/preview/:id', async (req, res) => {
         }
 
         const isCert = foundDoc.docType === 'certificate' || foundDoc.ref;
-        const title = isCert ? "Fire Safety Certificate" : "Quotation";
         const items = foundDoc.itemsData ? JSON.parse(foundDoc.itemsData) : null;
 
-        let itemsHTML = '';
-        if (isCert && items && items.items) {
-            itemsHTML = `
-                <table style="width:100%; border-collapse:collapse; margin-top:20px; font-size:14px;">
-                    <tr style="background:#f1f5f9;"><th style="border:1px solid #cbd5e1; padding:8px;">Type</th><th style="border:1px solid #cbd5e1; padding:8px;" colspan="2">Details</th></tr>
-                    <tr><td style="border:1px solid #cbd5e1; padding:8px;">Hy. Test</td><td colspan="2" style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${items.hyTest || '-'}</td></tr>
-                    <tr><td style="border:1px solid #cbd5e1; padding:8px;">Parts</td><td colspan="2" style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${items.parts || '-'}</td></tr>
-                    <tr><td style="border:1px solid #cbd5e1; padding:8px;">Remark</td><td colspan="2" style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${items.remark || '-'}</td></tr>
-                </table>
-            `;
-        } else if (!isCert && items) {
-            let rows = Array.isArray(items) ? items : [];
-            itemsHTML = `
-                <table style="width:100%; border-collapse:collapse; margin-top:20px; font-size:14px;">
-                    <tr style="background:#f1f5f9;"><th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Description</th><th style="border:1px solid #cbd5e1; padding:8px;">Qty</th><th style="border:1px solid #cbd5e1; padding:8px;">Rate</th><th style="border:1px solid #cbd5e1; padding:8px;">Amount</th></tr>
-                    ${rows.map(it => `<tr><td style="border:1px solid #cbd5e1; padding:8px;">${it.desc || ''}</td><td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${it.qty || 0}</td><td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">₹${it.rate || 0}</td><td style="border:1px solid #cbd5e1; padding:8px; text-align:right;">₹${Number(it.amount||0).toFixed(2)}</td></tr>`).join('')}
-                </table>
-            `;
-        }
+        if (isCert) {
+            // --- CERTIFICATE A4 EXACT HTML RENDERER ---
+            let tableRowsHTML = '';
+            if (items && items.items) {
+                Object.entries(items.items).forEach(([cat, rows]) => {
+                    const validRows = (rows || []).filter(r => r.cap || r.qty);
+                    if (validRows.length > 0) {
+                        const capStr = validRows.map(r => r.cap).filter(Boolean).join(', ');
+                        const qtyStr = validRows.map(r => r.qty).filter(Boolean).join(' + ');
+                        tableRowsHTML += `
+                            <tr>
+                                <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:500;">${cat}</td>
+                                <td style="padding:6px 10px; border:1px solid #000; font-weight:bold;">${capStr}</td>
+                                <td style="padding:6px 10px; border:1px solid #000; font-weight:bold;">${qtyStr}</td>
+                            </tr>
+                        `;
+                    }
+                });
+            }
 
-        res.send(`
-            <!DOCTYPE html>
-            <html>
-            <head>
-                <title>${title} - ${foundDoc.vendor || 'Shaney Enterprise'}</title>
-                <meta name="viewport" content="width=device-width, initial-scale=1">
-                <style>
-                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #e2e8f0; margin: 0; padding: 20px; display: flex; justify-content: center; }
-                    .card { background: #ffffff; width: 100%; max-width: 750px; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
-                    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #00a67e; padding-bottom: 20px; margin-bottom: 20px; }
-                    .firm-name { font-size: 22px; font-weight: 900; text-transform: uppercase; color: #0f172a; margin: 0; }
-                    .doc-title { font-size: 14px; font-weight: bold; color: #dc2626; margin-top: 5px; }
-                    .meta { text-align: right; font-size: 13px; color: #475569; }
-                    .details { font-size: 14px; line-height: 1.6; color: #334155; margin-bottom: 20px; }
-                    .total { text-align: right; font-size: 18px; font-weight: 900; color: #0f172a; margin-top: 20px; font-family: monospace; }
-                    .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; }
-                </style>
-            </head>
-            <body>
-                <div class="card">
-                    <div class="header">
-                        <div>
-                            <h1 class="firm-name">${foundDoc.vendor || 'Shaney Enterprise'}</h1>
-                            <div class="doc-title">${title}</div>
-                        </div>
-                        <div class="meta">
-                            <div><strong>Date:</strong> ${foundDoc.date || ''}</div>
-                            <div><strong>Ref No:</strong> ${foundDoc.ref || ''}</div>
+            return res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Certificate - ${foundDoc.vendor || 'Shaney Enterprise'}</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body { background: #cbd5e1; margin: 0; padding: 20px; display: flex; justify-content: center; font-family: 'Georgia', serif; }
+                        .a4-page { background: #ffffff; width: 794px; min-height: 1123px; padding: 40px; box-sizing: border-box; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.2); display: flex; flex-direction: column; }
+                        .content-row { display: flex; flex-direction: row; height: 100%; flex-grow: 1; position: relative; z-index: 10; }
+                        .cert-sidebar { width: 70px; min-width: 70px; display: flex; flex-direction: column; align-items: center; padding-top: 80px; }
+                        .cert-char { font-size: 42px; font-weight: 900; color: #dc2626; margin-bottom: 8px; line-height: 1; font-family: 'Georgia', serif; }
+                        .main-body { flex-grow: 1; display: flex; flex-direction: column; padding-left: 10px; }
+                        .header-box { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #00a67e; padding-bottom: 15px; margin-bottom: 25px; margin-top: 20px; }
+                        .firm-title { font-size: 32px; font-weight: 900; text-transform: uppercase; font-family: 'Arial', sans-serif; color: #0f172a; margin: 0; line-height: 1; }
+                        .firm-sub { font-size: 14px; font-weight: 900; color: #dc2626; margin-top: 6px; letter-spacing: 0.05em; }
+                        .meta-box { text-align: right; font-size: 14px; font-family: 'Georgia', serif; }
+                        .party-box { margin-bottom: 25px; font-size: 15.5px; line-height: 1.6; }
+                        .party-val { font-family: 'Caveat', cursive, Georgia, serif; font-size: 20px; font-weight: bold; text-transform: uppercase; margin-left: 10px; }
+                        .cert-text { text-align: center; font-size: 15.5px; line-height: 1.6; margin-bottom: 25px; font-style: italic; }
+                        .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-bottom: 30px; }
+                        .cert-table th { padding: 6px; text-align: center; border: 1px solid #000; font-size: 13px; font-weight: bold; background: transparent; }
+                        .cert-table td { padding: 6px; text-align: center; border: 1px solid #000; font-size: 12px; background: transparent; }
+                        .footer-box { margin-top: auto; padding-top: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
+                        .footer-addr { font-size: 10px; font-family: monospace; color: #64748b; line-height: 1.4; }
+                        .sign-box { text-align: center; min-width: 220px; font-family: 'Arial', sans-serif; }
+                        .sign-title { font-size: 14px; font-weight: bold; }
+                        .sign-space { height: 50px; }
+                    </style>
+                </head>
+                <body>
+                    <div class="a4-page">
+                        <div class="content-row">
+                            <div class="cert-sidebar">
+                                <div class="cert-char">C</div>
+                                <div class="cert-char">E</div>
+                                <div class="cert-char">R</div>
+                                <div class="cert-char">T</div>
+                                <div class="cert-char">I</div>
+                                <div class="cert-char">F</div>
+                                <div class="cert-char">I</div>
+                                <div class="cert-char">C</div>
+                                <div class="cert-char">A</div>
+                                <div class="cert-char">T</div>
+                                <div class="cert-char">E</div>
+                            </div>
+                            <div class="main-body">
+                                <div class="header-box">
+                                    <div>
+                                        <h1 class="firm-title">${foundDoc.vendor || 'COMPANY ENTERPRISE'}</h1>
+                                        <div class="firm-sub">Fire And Safety</div>
+                                    </div>
+                                    <div class="meta-box">
+                                        <div>Date :- <span>${foundDoc.date || 'DD-MM-YYYY'}</span></div>
+                                        <div style="margin-top: 4px;">SR.No :- <span>${foundDoc.ref || '-----'}</span></div>
+                                    </div>
+                                </div>
+
+                                <div class="party-box">
+                                    <div>Certified M/s:- <span class="party-val">${foundDoc.party || 'CUSTOMER NAME'}</span></div>
+                                    <div style="margin-top: 8px;">Address :- <span class="party-val">Address</span></div>
+                                </div>
+
+                                <div class="cert-text">
+                                    <div>We certify that the fire extinguishers mentioned below</div>
+                                    <div>Are tested and refilled as per the relevant Indian standard.</div>
+                                    <div style="margin-top: 6px;">This extinguishers are refilled on Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.date || 'DD-MM-YYYY'}</span></div>
+                                    <div>And Warranty will stand valid up to Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.validDate || 'DD-MM-YYYY'}</span></div>
+                                    <div>Provided the seal is unbroken and in satisfactory condition.</div>
+                                </div>
+
+                                <table class="cert-table">
+                                    <thead>
+                                        <tr>
+                                            <th style="width: 45%;">Extinguisher Type</th>
+                                            <th style="width: 30%;">Capacity</th>
+                                            <th style="width: 25%;">Qty</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Hy. Test</td>
+                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.hyTest || 'Pass'}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Parts</td>
+                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.parts || 'COMPLETE'}</td>
+                                        </tr>
+                                        <tr>
+                                            <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Remark</td>
+                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.remark || 'OK'}</td>
+                                        </tr>
+                                        ${tableRowsHTML}
+                                    </tbody>
+                                </table>
+
+                                <div class="footer-box">
+                                    <div class="footer-addr">
+                                        <div>112, Royal Plaza, Near Sai baba Temple, Zanzarda Road, Junagadh-362001.</div>
+                                        <div>+91 97263 50101 | +91 97264 50101</div>
+                                    </div>
+                                    <div class="sign-box">
+                                        <div class="sign-title">For ${foundDoc.vendor || 'COMPANY ENTERPRISE'}</div>
+                                        <div class="sign-space"></div>
+                                        <div class="sign-title">Authorised Signature</div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <div class="details">
-                        <p><strong>Billed To / Certified M/s:</strong> ${foundDoc.party || ''}</p>
-                        ${foundDoc.validDate ? `<p><strong>Valid Upto:</strong> ${foundDoc.validDate}</p>` : ''}
+                </body>
+                </html>
+            `);
+        } else {
+            // --- QUOTATION A4 EXACT HTML RENDERER ---
+            const quoteItems = items && Array.isArray(items) ? items : [];
+            const gross = quoteItems.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+            const gstRate = quoteItems.length > 0 && quoteItems[0].gst !== undefined ? Number(quoteItems[0].gst) : 18;
+            const cgst = (gross * (gstRate / 2)) / 100;
+            const sgst = (gross * (gstRate / 2)) / 100;
+            const grandTotal = Math.round(gross + cgst + sgst);
+
+            let qRowsHTML = quoteItems.map((it, idx) => `
+                <tr>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9; text-align:center;">${idx + 1}</td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9; text-align:left; font-weight:bold;">${it.desc || ''}</td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9; text-align:center;">${it.hsn || '8424'}</td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9; text-align:center;">${it.gst ?? 18}%</td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9; text-align:center;">${it.qty || 0}</td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9; text-align:center;">${it.rate || 0}</td>
+                    <td style="padding:10px; border-bottom:1px solid #f1f5f9; text-align:right; font-family:monospace; font-weight:bold;">${Number(it.amount || 0).toFixed(2)}</td>
+                </tr>
+            `).join('');
+
+            return res.send(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Quotation - ${foundDoc.vendor || 'Shaney Enterprise'}</title>
+                    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                    <style>
+                        body { background: #cbd5e1; margin: 0; padding: 20px; display: flex; justify-content: center; font-family: 'Arial', sans-serif; }
+                        .a4-page { background: #ffffff; width: 794px; min-height: 1123px; padding: 50px; box-sizing: border-box; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.2); display: flex; flex-direction: column; }
+                        .top-bar { position: absolute; top: 0; left: 0; right: 0; height: 8px; background: #1e40af; }
+                        .q-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #1e40af; padding-bottom: 20px; margin-bottom: 25px; }
+                        .q-title { font-size: 32px; font-weight: 900; color: #1e40af; text-transform: uppercase; margin: 0 0 5px 0; }
+                        .firm-name { font-size: 24px; font-weight: 900; color: #0f172a; text-transform: uppercase; margin: 0; }
+                        .billing-box { display: flex; justify-content: space-between; background: #f8fafc; padding: 15px; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 25px; }
+                        .q-table { width: 100%; border-collapse: collapse; margin-bottom: 25px; font-size: 13px; }
+                        .q-table th { background: #f1f5f9; color: #1e40af; padding: 12px 10px; text-transform: uppercase; font-size: 11px; font-weight: 800; border-bottom: 2px solid #1e40af; text-align: center; }
+                        .totals-box { width: 320px; margin-left: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; border-top: 2px solid #cbd5e1; padding-top: 15px; }
+                        .total-row { display: flex; justify-content: space-between; font-weight: bold; color: #475569; }
+                        .grand-total { display: flex; justify-content: space-between; font-size: 18px; font-weight: 900; color: #0f172a; background: #f1f5f9; padding: 10px; border-radius: 6px; font-family: monospace; }
+                        .footer-box { margin-top: auto; padding-top: 30px; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #e2e8f0; }
+                    </style>
+                </head>
+                <body>
+                    <div class="a4-page">
+                        <div class="top-bar"></div>
+                        <div class="q-header">
+                            <div>
+                                <h1 class="q-title">Quotation</h1>
+                                <h2 class="firm-name">${foundDoc.vendor || 'FIRM NAME'}</h2>
+                            </div>
+                            <div style="text-align: right; font-size: 14px;">
+                                <div><strong>Quote Ref:</strong> ${foundDoc.ref || ''}</div>
+                                <div style="margin-top: 5px;"><strong>Date:</strong> ${foundDoc.date || ''}</div>
+                            </div>
+                        </div>
+
+                        <div class="billing-box">
+                            <div>
+                                <div style="font-size: 10px; font-weight: 900; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Billed To</div>
+                                <div style="font-size: 15px; font-weight: 900; text-transform: uppercase; color: #0f172a;">${foundDoc.party || ''}</div>
+                            </div>
+                        </div>
+
+                        <table class="q-table">
+                            <thead>
+                                <tr>
+                                    <th style="width: 6%;">Sr.</th>
+                                    <th style="width: 40%; text-align: left;">Item Description</th>
+                                    <th style="width: 12%;">HSN</th>
+                                    <th style="width: 10%;">GST</th>
+                                    <th style="width: 10%;">Qty</th>
+                                    <th style="width: 12%;">Rate</th>
+                                    <th style="width: 10%; text-align: right;">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${qRowsHTML}
+                            </tbody>
+                        </table>
+
+                        <div class="totals-box">
+                            <div class="total-row"><span>Gross Taxable:</span><span>₹${gross.toFixed(2)}</span></div>
+                            <div class="total-row"><span>CGST (${gstRate / 2}%):</span><span>₹${cgst.toFixed(2)}</span></div>
+                            <div class="total-row" style="padding-bottom: 8px; border-bottom: 1px solid #cbd5e1;"><span>SGST (${gstRate / 2}%):</span><span>₹${sgst.toFixed(2)}</span></div>
+                            <div class="grand-total"><span>Grand Total:</span><span>₹${grandTotal.toFixed(2)}</span></div>
+                        </div>
+
+                        <div class="footer-box">
+                            <div style="font-size: 11px; color: #64748b;">* Terms & Conditions: Validity 30 days. E. & O.E.</div>
+                            <div style="text-align: center; min-width: 200px;">
+                                <div style="font-weight: bold; font-size: 14px;">For ${foundDoc.vendor || 'FIRM NAME'}</div>
+                                <div style="height: 45px;"></div>
+                                <div style="font-size: 13px; font-weight: bold;">Authorised Signature</div>
+                            </div>
+                        </div>
                     </div>
-                    ${itemsHTML}
-                    <div class="total">Grand Total: ₹${Number(foundDoc.total || 0).toFixed(2)}</div>
-                    <div class="footer">For ${foundDoc.vendor || 'Shaney Enterprise'} &bull; Verified Digital Document</div>
-                </div>
-            </body>
-            </html>
-        `);
+                </body>
+                </html>
+            `);
+        }
     } catch (err) {
         console.error("GET /preview/:id error:", err);
         res.status(500).send("Internal Server Error");
