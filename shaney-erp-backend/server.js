@@ -204,22 +204,24 @@ app.get('/api/document/:id', async (req, res) => {
     }
 });
 
-// 🟢 Exact-Match Professional A4 Preview Route for WhatsApp Links
+// 🟢 Exact-Match Professional A4 Preview Route for WhatsApp Links (With Background, Logos, Stamp & Clean Rows)
 app.get('/preview/:id', async (req, res) => {
     try {
         const docId = req.params.id;
         const scanResult = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
         
         let foundDoc = null;
-        for (const record of scanResult.Items) {
-            if (record.data && Array.isArray(record.data)) {
-                const match = record.data.find(i => String(i.id) === String(docId));
-                if (match) {
-                    foundDoc = match;
-                    break;
-                }
+        let firmTemplates = {};
+        let firmsList = [];
+
+        scanResult.Items.forEach(item => {
+            if (item.id === 'ERP_FirmTemplates_v104') firmTemplates = item.data || {};
+            if (item.id === 'ERP_Companies_v104') firmsList = item.data || [];
+            if (item.data && Array.isArray(item.data)) {
+                const match = item.data.find(i => String(i.id) === String(docId));
+                if (match) foundDoc = match;
             }
-        }
+        });
 
         if (!foundDoc) {
             return res.send(`
@@ -233,11 +235,17 @@ app.get('/preview/:id', async (req, res) => {
             `);
         }
 
+        const matchedFirm = firmsList.find(f => String(f.name).toLowerCase() === String(foundDoc.vendor).toLowerCase()) || firmsList[0] || {};
+        const templateKey = `${matchedFirm.id}_certificate`;
+        const design = firmTemplates[templateKey] || firmTemplates[matchedFirm.id] || {
+            themeColor: '#00a67e', certPos: 'left-vert', certPosX: 0, certPosY: 0, certFont: 'Georgia', certSize: 42, certColor: '#dc2626',
+            a4BgUrl: '', graphics: {}
+        };
+
         const isCert = foundDoc.docType === 'certificate' || foundDoc.ref;
         const items = foundDoc.itemsData ? JSON.parse(foundDoc.itemsData) : null;
 
         if (isCert) {
-            // --- CERTIFICATE A4 EXACT HTML RENDERER (NO EMPTY ROWS) ---
             let tableRowsHTML = '';
             if (items && items.items) {
                 Object.entries(items.items).forEach(([cat, rows]) => {
@@ -256,30 +264,41 @@ app.get('/preview/:id', async (req, res) => {
                 });
             }
 
+            const bgImageHTML = design.a4BgUrl ? `<img src="${design.a4BgUrl}" style="position:absolute; left:0; top:0; width:100%; height:100%; object-fit:cover; z-index:1; pointer-events:none;" />` : '';
+            
+            let graphicsHTML = '';
+            if (design.graphics) {
+                Object.entries(design.graphics).forEach(([k, g]) => {
+                    if (g && g.url) {
+                        graphicsHTML += `<img src="${g.url}" style="position:absolute; left:${20 + (g.x || 0)}px; top:${20 + (g.y || 0)}px; width:${g.size || 80}px; z-index:40; object-fit:contain; pointer-events:none;" />`;
+                    }
+                });
+            }
+
             return res.send(`
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Certificate - ${foundDoc.vendor || 'Shaney Enterprise'}</title>
+                    <title>Certificate - ${foundDoc.vendor}</title>
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <style>
                         body { background: #cbd5e1; margin: 0; padding: 20px; display: flex; justify-content: center; font-family: 'Georgia', serif; }
-                        .a4-page { background: #ffffff; width: 794px; min-height: 1123px; padding: 40px; box-sizing: border-box; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.2); display: flex; flex-direction: column; }
+                        .a4-page { background: #ffffff; width: 794px; min-height: 1123px; padding: 40px; box-sizing: border-box; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden; }
                         .content-row { display: flex; flex-direction: row; height: 100%; flex-grow: 1; position: relative; z-index: 10; }
                         .cert-sidebar { width: 70px; min-width: 70px; display: flex; flex-direction: column; align-items: center; padding-top: 80px; }
                         .cert-char { font-size: 42px; font-weight: 900; color: #dc2626; margin-bottom: 8px; line-height: 1; font-family: 'Georgia', serif; }
-                        .main-body { flex-grow: 1; display: flex; flex-direction: column; padding-left: 10px; }
-                        .header-box { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid #00a67e; padding-bottom: 15px; margin-bottom: 25px; margin-top: 20px; }
+                        .main-body { flex-grow: 1; display: flex; flex-direction: column; padding-left: 10px; z-index: 20; }
+                        .header-box { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid ${design.themeColor || '#00a67e'}; padding-bottom: 15px; margin-bottom: 25px; margin-top: 20px; }
                         .firm-title { font-size: 32px; font-weight: 900; text-transform: uppercase; font-family: 'Arial', sans-serif; color: #0f172a; margin: 0; line-height: 1; }
                         .firm-sub { font-size: 14px; font-weight: 900; color: #dc2626; margin-top: 6px; letter-spacing: 0.05em; }
                         .meta-box { text-align: right; font-size: 14px; font-family: 'Georgia', serif; }
                         .party-box { margin-bottom: 25px; font-size: 15.5px; line-height: 1.6; }
                         .party-val { font-family: 'Georgia', serif; font-size: 18px; font-weight: bold; text-transform: uppercase; margin-left: 10px; }
                         .cert-text { text-align: center; font-size: 15.5px; line-height: 1.6; margin-bottom: 25px; font-style: italic; }
-                        .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-bottom: 30px; }
+                        .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-bottom: 30px; background: transparent; }
                         .cert-table th { padding: 6px; text-align: center; border: 1px solid #000; font-size: 13px; font-weight: bold; background: transparent; }
                         .cert-table td { padding: 6px; text-align: center; border: 1px solid #000; font-size: 12px; background: transparent; }
-                        .footer-box { margin-top: auto; padding-top: 20px; border-top: 2px solid #00a67e; display: flex; justify-content: space-between; align-items: flex-end; }
+                        .footer-box { margin-top: auto; padding-top: 20px; border-top: 2px solid ${design.themeColor || '#00a67e'}; display: flex; justify-content: space-between; align-items: flex-end; }
                         .badges-row { display: flex; gap: 15px; align-items: center; font-size: 10px; font-weight: bold; color: #0369a1; margin-bottom: 6px; }
                         .footer-addr { font-size: 10px; font-family: monospace; color: #64748b; line-height: 1.4; }
                         .sign-box { text-align: center; min-width: 220px; font-family: 'Arial', sans-serif; }
@@ -289,6 +308,8 @@ app.get('/preview/:id', async (req, res) => {
                 </head>
                 <body>
                     <div class="a4-page">
+                        ${bgImageHTML}
+                        ${graphicsHTML}
                         <div class="content-row">
                             <div class="cert-sidebar">
                                 <div class="cert-char">C</div>
@@ -347,7 +368,7 @@ app.get('/preview/:id', async (req, res) => {
                                         </tr>
                                         <tr>
                                             <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Remark</td>
-                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.rows || items?.remark || 'OK'}</td>
+                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.remark || 'OK'}</td>
                                         </tr>
                                         ${tableRowsHTML}
                                     </tbody>
