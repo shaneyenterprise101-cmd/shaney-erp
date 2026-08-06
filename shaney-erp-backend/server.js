@@ -243,9 +243,9 @@ app.get('/preview/:id', async (req, res) => {
                         const qtyStr = validRows.map(r => r.qty).filter(Boolean).join(' + ');
                         tableRowsHTML += `
                             <tr>
-                                <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:500;">${cat}</td>
-                                <td style="padding:6px 10px; border:1px solid #000; font-weight:bold;">${capStr}</td>
-                                <td style="padding:6px 10px; border:1px solid #000; font-weight:bold;">${qtyStr}</td>
+                                <td style="text-align:left; padding:5px 10px; border:1px solid #000; font-style:italic; font-weight:500;">${cat}</td>
+                                <td style="padding:5px 10px; border:1px solid #000; font-weight:bold;">${capStr}</td>
+                                <td style="padding:5px 10px; border:1px solid #000; font-weight:bold;">${qtyStr}</td>
                             </tr>
                         `;
                     }
@@ -260,48 +260,52 @@ app.get('/preview/:id', async (req, res) => {
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <style>
                         body { background: #cbd5e1; margin: 0; padding: 20px; display: flex; justify-content: center; font-family: 'Georgia', serif; }
-                        .a4-page { background: #ffffff; width: 794px; min-height: 1123px; padding: 35px 40px; box-sizing: border-box; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden; }
+                        .a4-page { background: #ffffff; width: 794px; min-height: 1123px; padding: 30px 40px; box-sizing: border-box; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden; }
                         
-                        /* Top & Bottom Decorative Curves */
-                        .top-curve { position: absolute; top: 0; left: 0; width: 100%; height: 75px; background: linear-gradient(135deg, #f97316 0%, #ea580c 50%, #dc2626 100%); clip-path: ellipse(75% 100% at 50% 0%); z-index: 1; }
-                        .bottom-curve { position: absolute; bottom: 0; left: 0; width: 100%H; height: 35px; background: linear-gradient(135deg, #dc2626 0%, #ea580c 50%, #f97316 100%); z-index: 1; }
+                        /* Top & Bottom Branded Gradient Waves */
+                        .top-wave { position: absolute; top: 0; left: 0; width: 100%; height: 75px; background: linear-gradient(135deg, #ff7e1d 0%, #f97316 40%, #e11d48 100%); clip-path: ellipse(75% 100% at 50% 0%); z-index: 1; }
+                        .bottom-wave { position: absolute; bottom: 0; left: 0; width: 100%; height: 35px; background: linear-gradient(135deg, #e11d48 0%, #f97316 60%, #ff7e1d 100%); z-index: 1; }
 
                         .content-wrapper { position: relative; z-index: 10; display: flex; flex-direction: column; flex-grow: 1; }
                         .content-row { display: flex; flex-direction: row; flex-grow: 1; }
                         
-                        .cert-sidebar { width: 55px; min-width: 55px; display: flex; flex-direction: column; align-items: center; padding-top: 40px; }
-                        .cert-char { font-size: 38px; font-weight: 900; color: #dc2626; margin-bottom: 4px; line-height: 1; font-family: 'Georgia', serif; }
+                        .cert-sidebar { width: 55px; min-width: 55px; display: flex; flex-direction: column; align-items: center; padding-top: 30px; }
+                        .cert-char { font-size: 38px; font-weight: 900; color: #dc2626; margin-bottom: 3px; line-height: 1; font-family: 'Georgia', serif; }
                         
                         .main-body { flex-grow: 1; display: flex; flex-direction: column; padding-left: 10px; }
                         
-                        .header-box { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #00a67e; padding-bottom: 12px; margin-bottom: 20px; margin-top: 25px; }
-                        .firm-title { font-size: 30px; font-weight: 900; text-transform: uppercase; font-family: 'Arial', sans-serif; color: #0f172a; margin: 0; line-height: 1; }
-                        .firm-sub { font-size: 13px; font-weight: 900; color: #dc2626; margin-top: 5px; letter-spacing: 0.05em; }
-                        .meta-box { text-align: right; font-size: 13.5px; font-family: 'Georgia', serif; }
+                        /* Exact Logo & Banner Layout */
+                        .header-box { display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 3px solid #00a67e; padding-bottom: 10px; margin-bottom: 18px; margin-top: 22px; }
+                        .logo-container { display: flex; align-items: center; gap: 15px; }
+                        .logo-emblem { width: 75px; height: 75px; object-fit: contain; }
+                        .cylinder-graphic { width: 42px; height: 75px; object-fit: contain; }
+                        .firm-title { font-size: 28px; font-weight: 900; text-transform: uppercase; font-family: 'Arial', sans-serif; color: #0f172a; margin: 0; line-height: 1.1; letter-spacing: 0.5px; }
+                        .firm-sub { font-size: 13px; font-weight: bold; color: #dc2626; margin-top: 4px; letter-spacing: 0.08em; }
+                        .meta-box { text-align: right; font-size: 13.5px; font-family: 'Georgia', serif; padding-bottom: 2px; }
                         
-                        .party-box { margin-bottom: 20px; font-size: 15px; line-height: 1.5; }
-                        .party-val { font-family: 'Georgia', serif; font-size: 17px; font-weight: bold; text-transform: uppercase; margin-left: 8px; }
+                        .party-box { margin-bottom: 18px; font-size: 14.5px; line-height: 1.5; }
+                        .party-val { font-family: 'Georgia', serif; font-size: 17px; font-weight: bold; text-transform: uppercase; margin-left: 8px; color: #111; }
                         
-                        .cert-text { text-align: center; font-size: 14.5px; line-height: 1.5; margin-bottom: 20px; font-style: italic; }
+                        .cert-text { text-align: center; font-size: 14px; line-height: 1.5; margin-bottom: 18px; font-style: italic; }
                         
-                        .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-bottom: 20px; }
+                        .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-bottom: 18px; }
                         .cert-table th { padding: 5px; text-align: center; border: 1px solid #000; font-size: 12px; font-weight: bold; background: #f8fafc; }
-                        .cert-table td { padding: 5px; text-align: center; border: 1px solid #000; font-size: 11.5px; }
+                        .cert-table td { padding: 5px; text-align: center; border: 1px solid #000; font-size: 11px; }
                         
-                        .footer-box { margin-top: auto; padding-top: 15px; padding-bottom: 20px; border-top: 2px solid #00a67e; display: flex; justify-content: space-between; align-items: flex-end; }
-                        .badges-row { display: flex; gap: 10px; align-items: center; font-size: 9.5px; font-weight: bold; color: #0369a1; margin-bottom: 5px; }
-                        .footer-addr { font-size: 9.5px; font-family: monospace; color: #64748b; line-height: 1.3; }
+                        .footer-box { margin-top: auto; padding-top: 12px; padding-bottom: 15px; border-top: 2px solid #00a67e; display: flex; justify-content: space-between; align-items: flex-end; }
+                        .badges-row { display: flex; gap: 12px; align-items: center; font-size: 9px; font-weight: bold; color: #0369a1; margin-bottom: 4px; }
+                        .footer-addr { font-size: 9px; font-family: monospace; color: #64748b; line-height: 1.3; }
                         
-                        .sign-box { text-align: center; min-width: 200px; font-family: 'Arial', sans-serif; position: relative; }
-                        .sign-title { font-size: 13px; font-weight: bold; }
-                        .stamp-img { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%) rotate(-8deg); width: 110px; opacity: 0.85; pointer-events: none; }
-                        .sign-space { height: 50px; }
+                        .sign-box { text-align: center; min-width: 190px; font-family: 'Arial', sans-serif; position: relative; }
+                        .sign-title { font-size: 12.5px; font-weight: bold; }
+                        .stamp-svg { position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%) rotate(-7deg); width: 105px; opacity: 0.88; pointer-events: none; }
+                        .sign-space { height: 45px; }
                     </style>
                 </head>
                 <body>
                     <div class="a4-page">
-                        <div class="top-curve"></div>
-                        <div class="bottom-curve"></div>
+                        <div class="top-wave"></div>
+                        <div class="bottom-wave"></div>
                         
                         <div class="content-wrapper">
                             <div class="content-row">
@@ -320,9 +324,23 @@ app.get('/preview/:id', async (req, res) => {
                                 </div>
                                 <div class="main-body">
                                     <div class="header-box">
-                                        <div>
-                                            <h1 class="firm-title">${foundDoc.vendor || 'SHANEY ENTERPRISE'}</h1>
-                                            <div class="firm-sub">Fire And Safety</div>
+                                        <div class="logo-container">
+                                            <!-- Exact Shield & Fire Extinguisher Graphical Representation Matching App Header -->
+                                            <svg width="60" height="60" viewBox="0 0 100 100" style="flex-shrink:0;">
+                                                <path d="M50 5 L90 20 L90 55 C90 75 70 90 50 95 C30 90 10 75 10 55 L10 20 Z" fill="#ff7e1d" stroke="#e11d48" stroke-width="4"/>
+                                                <path d="M50 15 L80 27 L80 52 C80 68 65 80 50 85 C35 80 20 68 20 52 L20 27 Z" fill="#ffffff"/>
+                                                <path d="M50 25 Q60 45 45 60 Q55 50 50 25 Z" fill="#ff7e1d"/>
+                                            </svg>
+                                            <svg width="35" height="65" viewBox="0 0 50 90" style="flex-shrink:0;">
+                                                <rect x="12" y="20" width="26" height="55" rx="10" fill="#dc2626"/>
+                                                <rect x="20" y="8" width="10" height="12" fill="#334155"/>
+                                                <path d="M15 8 Q25 2 35 8" fill="none" stroke="#334155" stroke-width="3"/>
+                                                <text x="25" y="48" font-size="9" font-weight="bold" fill="#ffffff" text-anchor="middle" transform="rotate(90 25 48)">SHANEY</text>
+                                            </svg>
+                                            <div>
+                                                <h1 class="firm-title">${foundDoc.vendor || 'SHANEY ENTERPRISE'}</h1>
+                                                <div class="firm-sub">Fire And Safety</div>
+                                            </div>
                                         </div>
                                         <div class="meta-box">
                                             <div>Date :- <span>${foundDoc.date || 'DD-MM-YYYY'}</span></div>
@@ -332,13 +350,13 @@ app.get('/preview/:id', async (req, res) => {
 
                                     <div class="party-box">
                                         <div>Certified M/s:- <span class="party-val">${foundDoc.party || 'CUSTOMER NAME'}</span></div>
-                                        <div style="margin-top: 6px;">Address :- <span class="party-val">ADDRESS</span></div>
+                                        <div style="margin-top: 5px;">Address :- <span class="party-val">ADDRESS</span></div>
                                     </div>
 
                                     <div class="cert-text">
                                         <div>We certify that the fire extinguishers mentioned below</div>
                                         <div>Are tested and refilled as per the relevant Indian standard.</div>
-                                        <div style="margin-top: 5px;">This extinguishers are refilled on Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.date || 'DD-MM-YYYY'}</span></div>
+                                        <div style="margin-top: 4px;">This extinguishers are refilled on Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.date || 'DD-MM-YYYY'}</span></div>
                                         <div>And Warranty will stand valid up to Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.validDate || 'DD-MM-YYYY'}</span></div>
                                         <div>Provided the seal is unbroken and in satisfactory condition.</div>
                                     </div>
@@ -384,8 +402,8 @@ app.get('/preview/:id', async (req, res) => {
                                         </div>
                                         <div class="sign-box">
                                             <div class="sign-title">For ${foundDoc.vendor || 'Shaney Enterprise'}</div>
-                                            <!-- Official Round Purple Stamp Simulation -->
-                                            <svg class="stamp-img" viewBox="0 0 120 120">
+                                            <!-- Precise Official Purple Round Stamp SVG -->
+                                            <svg class="stamp-svg" viewBox="0 0 120 120">
                                                 <circle cx="60" cy="60" r="54" fill="none" stroke="#6b21a8" stroke-width="2.5" stroke-dasharray="4,2"/>
                                                 <circle cx="60" cy="60" r="44" fill="none" stroke="#6b21a8" stroke-width="1.5"/>
                                                 <text x="60" y="32" font-size="9" font-weight="bold" fill="#6b21a8" text-anchor="middle" font-family="Arial">SHANEY ENTERPRISE</text>
@@ -444,7 +462,7 @@ app.get('/preview/:id', async (req, res) => {
                         .total-row { display: flex; justify-content: space-between; font-weight: bold; color: #475569; }
                         .grand-total { display: flex; justify-content: space-between; font-size: 18px; font-weight: 900; color: #0f172a; background: #f1f5f9; padding: 10px; border-radius: 6px; font-family: monospace; }
                         .footer-box { margin-top: auto; padding-top: 30px; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #e2e8f0; position: relative; }
-                        .stamp-img { position: absolute; bottom: 25px; left: 65%; transform: translateX(-50%) rotate(-8deg); width: 110px; opacity: 0.85; pointer-events: none; }
+                        .stamp-svg { position: absolute; bottom: 25px; left: 65%; transform: translateX(-50%) rotate(-7deg); width: 105px; opacity: 0.88; pointer-events: none; }
                     </style>
                 </head>
                 <body>
@@ -496,7 +514,7 @@ app.get('/preview/:id', async (req, res) => {
                             <div style="font-size: 11px; color: #64748b;">* Terms & Conditions: Validity 30 days. E. & O.E.</div>
                             <div style="text-align: center; min-width: 200px; position: relative;">
                                 <div style="font-weight: bold; font-size: 14px;">For ${foundDoc.vendor || 'FIRM NAME'}</div>
-                                <svg class="stamp-img" viewBox="0 0 120 120">
+                                <svg class="stamp-svg" viewBox="0 0 120 120">
                                     <circle cx="60" cy="60" r="54" fill="none" stroke="#6b21a8" stroke-width="2.5" stroke-dasharray="4,2"/>
                                     <circle cx="60" cy="60" r="44" fill="none" stroke="#6b21a8" stroke-width="1.5"/>
                                     <text x="60" y="32" font-size="9" font-weight="bold" fill="#6b21a8" text-anchor="middle" font-family="Arial">SHANEY ENTERPRISE</text>
