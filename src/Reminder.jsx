@@ -1,5 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import * as XLSX from 'xlsx';
+import jsPDF from 'jspdf';
+import { toJpeg } from 'html-to-image';
+import { SyncManager } from './SyncManager';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
@@ -10,12 +14,64 @@ const getCurrentFY = () => {
   return m >= 4 ? `F.Y. ${y}-${String(y + 1).slice(-2)}` : `F.Y. ${y - 1}-${String(y).slice(-2)}`;
 };
 
+// --- ROBUST FY NORMALIZER ---
+const normalizeFY = (fyStr) => {
+  if (!fyStr || fyStr === 'ALL') return fyStr;
+  let clean = String(fyStr).trim().toUpperCase();
+  clean = clean.replace(/^(F\.Y\.?\s*|FY\s*)/, '');
+  if (clean.match(/^\d{2}-\d{2}$/)) {
+    clean = '20' + clean;
+  }
+  return `F.Y. ${clean}`;
+};
+
+const getFinancialYear = (refStr, dateStr) => {
+  if (refStr) {
+    const match = String(refStr).match(/(\d{2})-(\d{2})/);
+    if (match) {
+      return `F.Y. ${match[1]}-${match[2]}`;
+    }
+  }
+
+  if (!dateStr) return getCurrentFY();
+  let day, month, year;
+  let cleanStr = String(dateStr).trim();
+  if (cleanStr.includes('/')) cleanStr = cleanStr.replace(/\//g, '-');
+  
+  if (cleanStr.includes('-')) {
+    const parts = cleanStr.split('-');
+    if (parts[0].length === 4) {
+      year = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+    } else {
+      day = parseInt(parts[0], 10);
+      month = parseInt(parts[1], 10);
+      year = parseInt(parts[2], 10);
+    }
+  }
+  if (!year || isNaN(year)) return getCurrentFY();
+  if (month >= 4) {
+    const nextYr = String(year + 1).slice(-2);
+    return `F.Y. ${year}-${nextYr}`;
+  } else {
+    const prevYr = String(year - 1).slice(-2);
+    return `F.Y. ${year - 1}-${String(year).slice(-2)}`;
+  }
+};
+
 // 🟢 BULLETPROOF DATA SANITIZER WITH TIMESTAMP FALLBACK
 const sanitizeForCloud = (dataObj) => {
   let cleaned = { ...dataObj };
   if (!cleaned.updatedAt) {
-    cleaned.updatedAt = Date.now(); // 🟢 Timestamp fallback
+    cleaned.updatedAt = Date.now();
   }
+  
+  if (cleaned.fy && cleaned.fy !== 'ALL') {
+    cleaned.fy = normalizeFY(cleaned.fy);
+  } else {
+    cleaned.fy = normalizeFY(getFinancialYear(cleaned.ref, cleaned.date || cleaned.validDate) || getCurrentFY());
+  }
+
   Object.keys(cleaned).forEach(key => {
     if (cleaned[key] === undefined) {
       cleaned[key] = null;
@@ -62,14 +118,20 @@ export default function Reminder({ selectedFY }) {
   
   // 🟢 Pagination State for Reminders
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10; // 🟢 Set to 10 rows per page
+  const rowsPerPage = 10;
   
   // Modal State for Non-Returning / Permanent Closed Customers
   const [isNeverReturnModalOpen, setIsNeverReturnModalOpen] = useState(false);
+  const [activePreviewCert, setActivePreviewCert] = useState(null);
 
   const [firms, setFirms] = useState(() => {
     const saved = localStorage.getItem('ERP_Companies_v104');
     return saved ? JSON.parse(saved).filter(f => f.type === 'certificate') : [];
+  });
+
+  const [firmTemplates, setFirmTemplates] = useState(() => {
+    const saved = localStorage.getItem('ERP_FirmTemplates_v104');
+    return saved ? JSON.parse(saved) : {};
   });
 
   const [customers, setCustomers] = useState(() => {
@@ -121,7 +183,7 @@ export default function Reminder({ selectedFY }) {
     fetchCloudHistory();
 
     const handleDataUpdate = (e) => {
-      if (!e.detail || e.detail.type === 'certificates' || e.detail.type === 'customers') {
+      if (!e.detail || e.detail.type === 'certificates' || e.detail.type === 'customers' || e.detail.type === 'templates') {
         try {
           const saved = localStorage.getItem('ERP_History_v104');
           if (saved) {
@@ -132,6 +194,10 @@ export default function Reminder({ selectedFY }) {
           const savedCust = localStorage.getItem('ERP_Customers_v104');
           if (savedCust) {
             setCustomers(JSON.parse(savedCust));
+          }
+          const savedTemplates = localStorage.getItem('ERP_FirmTemplates_v104');
+          if (savedTemplates) {
+            setFirmTemplates(JSON.parse(savedTemplates));
           }
         } catch(err) {
           console.error("Reminder sync parse error:", err);
@@ -146,7 +212,8 @@ export default function Reminder({ selectedFY }) {
     setCurrentPage(1);
   }, [searchTerm, selectedFirm, reminderFY, filterDays]);
 
-  const availableFYs = Array.from(new Set(historyData.map(c => c.fy || getCurrentFY()).filter(Boolean))).sort().reverse();
+  const availableFYs = Array.from(new Set(historyData.map(c => normalizeFY(c.fy || getFinancialYear(c.ref, c.date) || getCurrentFY())).filter(Boolean))).sort().reverse();
+  if (availableFYs.length === 0) availableFYs.push(normalizeFY(getCurrentFY()));
 
   const handleDaysChange = (days) => {
     setFilterDays(days);
@@ -205,7 +272,6 @@ export default function Reminder({ selectedFY }) {
     });
   };
 
-  // Active Pending Reminders (Excludes done and permanent non-returning customers)
   const filteredReminders = historyData.filter(c => {
     if (!c.validDate) return false;
     if (c.reminderDone) return false; 
@@ -223,7 +289,7 @@ export default function Reminder({ selectedFY }) {
 
     const matchesSearch = (c.party || '').toLowerCase().includes(searchTerm.toLowerCase()) || (c.ref || '').toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFirm = selectedFirm === 'ALL' || c.vendor === selectedFirm;
-    const rowFY = c.fy || getCurrentFY();
+    const rowFY = normalizeFY(c.fy || getFinancialYear(c.ref, c.date) || getCurrentFY());
     const matchesFY = reminderFY === 'ALL' || rowFY === reminderFY || rowFY.includes(reminderFY);
 
     return matchesSearch && matchesFirm && matchesFY;
@@ -234,16 +300,31 @@ export default function Reminder({ selectedFY }) {
     return { ...c, daysLeft: diffDays };
   }).sort((a, b) => a.daysLeft - b.daysLeft);
 
-  // 🟢 Pagination Slicing for Reminders
   const totalPages = Math.ceil(filteredReminders.length / rowsPerPage) || 1;
   const paginatedReminders = filteredReminders.slice(
     (currentPage - 1) * rowsPerPage,
     currentPage * rowsPerPage
   );
 
-  // List of Non-Returning / Lost Customers
   const neverReturnList = historyData.filter(c => c.neverReturn);
 
+  const getCustomerAddress = (partyName) => {
+    const found = customers.find(c => c.name.toLowerCase() === partyName.toLowerCase());
+    if (found) {
+      let addrParts = [];
+      if (found.village) addrParts.push(found.village);
+      if (found.taluka) addrParts.push(found.taluka);
+      if (found.district) addrParts.push(found.district);
+      let addrStr = addrParts.join(', ');
+      if (found.state || found.pincode) {
+        addrStr += `, ${found.state || ''} ${found.pincode ? '- ' + found.pincode : ''}`;
+      }
+      return addrStr.trim() || found.address || '';
+    }
+    return '';
+  };
+
+  // 🟢 CAPACITOR NATIVE SHARE & CLIPBOARD INTEGRATION FOR REMINDER
   const handleWhatsAppSend = async (e, cert) => {
     e.stopPropagation();
     
@@ -252,7 +333,7 @@ export default function Reminder({ selectedFY }) {
     let targetRecord = null;
     if (idx !== -1) {
       allHistory[idx].whatsappSent = true;
-      allHistory[idx].updatedAt = Date.now(); // 🟢 Timestamp update
+      allHistory[idx].updatedAt = Date.now();
       targetRecord = allHistory[idx];
       localStorage.setItem('ERP_History_v104', JSON.stringify(allHistory));
       setHistoryData(allHistory.filter(b => b.docType === 'certificate'));
@@ -275,18 +356,95 @@ export default function Reminder({ selectedFY }) {
       logActionToBackend(`Sent Expiry Reminder WhatsApp to ${cert.party} (Ref: ${cert.ref})`);
     }
 
-    const cData = customers.find(c => c.name.toLowerCase() === cert.party.toLowerCase());
-    const phone = cData?.contact || cData?.phone || cert.partyNum || '';
-    const baseUrl = BACKEND_URL;
-    const docLink = `${baseUrl}/preview/${cert.id}`;
-    
-    const template = localStorage.getItem("waTempExpiry") || "Hello {name},\n\nThis is a gentle reminder that your Fire Safety Certificate (Ref: {ref}) is valid up to {date}.\n\n📄 View Document:\n🔗 {docLink}";
-    const msg = template.replace("{name}", cert.party).replace("{ref}", cert.ref).replace("{date}", cert.validDate).replace("{docLink}", docLink);
-    
-    // 🟢 1 Second delay before opening WhatsApp as requested
-    setTimeout(() => {
-      window.open(`https://wa.me/${phone ? '91'+phone.replace(/\D/g,'') : ''}?text=${encodeURIComponent(msg)}`, '_blank');
-    }, 1000);
+    setActivePreviewCert(cert);
+
+    setTimeout(async () => {
+      let element = document.getElementById('background-pdf-render-area') || document.getElementById('reminder-cert-print-area');
+      
+      if (!element) {
+        setActivePreviewCert(null);
+        alert("Could not render document for sharing.");
+        return;
+      }
+
+      try {
+        document.body.style.cursor = 'wait';
+        const scaleWrapper = element.parentElement;
+        const originalClassName = scaleWrapper ? scaleWrapper.className : '';
+        const originalTransform = scaleWrapper ? scaleWrapper.style.transform : '';
+
+        if (scaleWrapper) {
+          scaleWrapper.className = originalClassName.replace(/scale-\[[^\]]+\]/g, '').replace(/transform/g, '');
+          scaleWrapper.style.transform = 'none';
+        }
+
+        await new Promise(r => setTimeout(r, 300));
+
+        const dataUrl = await toJpeg(element, {
+          quality: 0.85,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff'
+        });
+
+        if (scaleWrapper) {
+          scaleWrapper.className = originalClassName;
+          scaleWrapper.style.transform = originalTransform;
+        }
+
+        const pdf = new jsPDF({
+          orientation: 'p',
+          unit: 'mm',
+          format: 'a4',
+          compress: true
+        });
+
+        const imgProps = pdf.getImageProperties(dataUrl);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+        pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+        
+        const template = localStorage.getItem("waTempExpiry") || "Hello {name},\n\nThis is a gentle reminder that your Fire Safety Certificate (Ref: {ref}) is valid up to {date}.\n\nPlease find attached document.\n\nThank you!\n- {vendor}";
+        const msg = template.replace("{name}", cert.party).replace("{ref}", cert.ref).replace("{date}", cert.validDate).replace("{vendor}", cert.vendor);
+
+        const base64Pdf = pdf.output('datauristring').split(',')[1];
+        const filename = `${(cert.party || 'Certificate').replace(/[^a-zA-Z0-9-_]/g, '_')}_${(cert.ref || 'Ref').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+
+        await Filesystem.writeFile({
+          path: filename,
+          data: base64Pdf,
+          directory: Directory.Cache,
+          recursive: true
+        });
+
+        const fileUri = await Filesystem.getUri({
+          directory: Directory.Cache,
+          path: filename
+        });
+
+        document.body.style.cursor = 'default';
+        setActivePreviewCert(null);
+
+        try {
+          await navigator.clipboard.writeText(msg);
+        } catch (clipErr) {
+          console.log("Clipboard write failed:", clipErr);
+        }
+
+        await Share.share({
+          title: 'Fire Safety Certificate Expiry Reminder',
+          text: msg,
+          url: fileUri.uri,
+          dialogTitle: 'Share via WhatsApp'
+        });
+
+      } catch (err) {
+        console.error("Capacitor Share failed:", err);
+        document.body.style.cursor = 'default';
+        setActivePreviewCert(null);
+        alert(`Could not share PDF. Reason: ${err.message || err}`);
+      }
+    }, 400);
   };
 
   const setNeverReturnStatus = async (e, id, statusVal) => {
@@ -295,7 +453,7 @@ export default function Reminder({ selectedFY }) {
     let targetRecord = null;
     allHistory = allHistory.map(h => {
       if (h.id === id) {
-        targetRecord = { ...h, neverReturn: statusVal, updatedAt: Date.now() }; // 🟢 Timestamp update
+        targetRecord = { ...h, neverReturn: statusVal, updatedAt: Date.now() };
         return targetRecord;
       }
       return h;
@@ -327,7 +485,7 @@ export default function Reminder({ selectedFY }) {
     let targetRecord = null;
     allHistory = allHistory.map(h => {
       if (h.id === id) {
-        targetRecord = { ...h, reminderDone: statusVal, updatedAt: Date.now() }; // 🟢 Timestamp update
+        targetRecord = { ...h, reminderDone: statusVal, updatedAt: Date.now() };
         return targetRecord;
       }
       return h;
@@ -441,9 +599,209 @@ export default function Reminder({ selectedFY }) {
     }
   };
 
+  const renderA4PageForReminder = (cert) => {
+      if (!cert) return null;
+      const firmObj = firms.find(f => f.name.toLowerCase() === (cert.vendor || '').toLowerCase()) || firms[0] || { name: 'COMPANY ENTERPRISE', address: 'Address', contact: '' };
+      
+      let design = firmTemplates[firmObj.id + '_certificate'] || firmTemplates[firmObj.id] || {
+        themeColor: '#00a67e', certPos: 'left-vert', certPosX: 0, certPosY: 0, certFont: 'Georgia', certSize: 42, certColor: '#dc2626', certBold: true, certItalic: false, certUnderline: false,
+        headerFont: 'Arial', headerSize: 36, headerColor: '#0f172a', headerBold: true, headerItalic: false, headerUnderline: false,
+        docFont: 'Georgia', docSize: 15.5, docColor: '#000000', docBold: false, docItalic: true, docUnderline: false,
+        custFont: 'Caveat', custSize: 20, custColor: '#000000', custBold: false, custItalic: false, custUnderline: false,
+        sigFont: 'Arial', sigSize: 14, sigColor: '#000000', sigBold: false, sigItalic: true, sigUnderline: false, sigX: 0, sigY: 0,
+        a4BgUrl: '', topMargin: 0, graphics: {}
+      };
+
+      const graphics = design.graphics || {};
+      const docS = design.docSize || 15.5;
+      const thSize = Math.max(10, Math.floor(docS * 0.85));
+      const tdSize = Math.max(10, Math.floor(docS * 0.75));
+      const items = cert.itemsData ? JSON.parse(cert.itemsData) : { hyTest: '-', parts: '-', remark: '-', items: {} };
+      const categories = ["ABC Stored Pressure", "Co2", "Water Co2", "M-Foam", "Dry Chemical Powder", "Dissolved acetylene gas", "Oxygen", "Argon gas"];
+
+      return (
+          <div 
+            id="reminder-cert-print-area"
+            className="relative flex flex-col shrink-0 box-border p-8 shadow-2xl overflow-hidden"
+            style={{ 
+              backgroundColor: '#ffffff',
+              width: '794px', height: '1123px', minWidth: '794px', minHeight: '1123px', maxWidth: '794px', maxHeight: '1123px',
+              paddingTop: `${20 + (design.topMargin || 0)}px`,
+              position: 'relative',
+              zIndex: 0
+            }}
+          >
+            {design.a4BgUrl && (
+              <img src={design.a4BgUrl} alt="Background" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 1, pointerEvents: 'none' }} />
+            )}
+
+            {Object.entries(graphics).map(([k, g]) => {
+              if (!g || !g.url) return null;
+              return (
+                <img 
+                  key={k} 
+                  src={g.url} 
+                  alt={k} 
+                  style={{ 
+                    position: 'absolute', 
+                    left: `${20 + (g.x || 0)}px`, 
+                    top: `${20 + (g.y || 0)}px`, 
+                    width: `${g.size || 80}px`, 
+                    zIndex: 40, 
+                    objectFit: 'contain',
+                    pointerEvents: 'none'
+                  }} 
+                />
+              );
+            })}
+
+            <style dangerouslySetInnerHTML={{__html: `
+              .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-family: ${design.docFont}, sans-serif; table-layout: fixed; word-break: break-word; background: transparent; }
+              .cert-table th { padding: 4px; text-align: center; border: 1px solid #000; font-size: ${thSize}px; font-weight: bold; color: ${design.docColor}; font-style: ${design.docItalic ? 'italic' : 'normal'}; overflow: hidden; word-break: break-word; background: transparent; }
+              .cert-table td { padding: 4px; text-align: center; border: 1px solid #000; font-size: ${tdSize}px; font-weight: ${design.docBold ? 'bold' : 'normal'}; color: ${design.docColor}; font-style: ${design.docItalic ? 'italic' : 'normal'}; text-decoration: ${design.docUnderline ? 'underline' : 'none'}; word-break: break-word; overflow-wrap: break-word; background: transparent; }
+              .cert-table td.left-align { text-align: left; padding-left: 10px; }
+            `}} />
+
+            <div className="flex h-full w-full pt-[20px] pb-[60px] pl-[10px] pr-[20px] flex-row relative" style={{ zIndex: 10 }}>
+              
+              {design.certPos !== 'none' && (
+                <div className={design.certPos === 'top-center' ? 'absolute left-1/2 -translate-x-1/2 top-0 w-full text-center' : 'flex-shrink-0 flex flex-col items-center justify-start pt-[100px]'} style={{ width: design.certPos === 'top-center' ? '100%' : '70px', minWidth: design.certPos === 'top-center' ? 'auto' : '70px', transform: `translate(${design.certPosX}px, ${design.certPosY}px)` }}>
+                  <div style={{ fontFamily: design.certFont, fontSize: `${design.certSize}px`, color: design.certColor, fontWeight: design.certBold ? '900' : 'normal', fontStyle: design.certItalic ? 'italic' : 'normal', textDecoration: design.certUnderline ? 'underline' : 'none', textAlign: 'center', lineHeight: '1' }}>
+                    {design.certPos === 'top-center' ? <span>CERTIFICATE</span> : 'CERTIFICATE'.split('').map((char, i) => <div key={i} style={{ marginBottom: '8px', display: 'block' }}>{char}</div>)}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex-grow flex flex-col pt-2 h-full z-20" style={{ width: design.certPos === 'top-center' ? '100%' : 'calc(100% - 70px)' }}>
+                <div className="flex items-center mb-4 w-full pb-4 flex-shrink-0 mt-5 justify-between" style={{ borderBottom: `3px solid ${design.a4BgUrl ? 'transparent' : design.themeColor}` }}>
+                  <div className="flex flex-col justify-center">
+                    {!design.a4BgUrl && (
+                      <h1 className="leading-none uppercase tracking-tight" style={{ fontFamily: design.headerFont, fontSize: `${design.headerSize}px`, color: design.headerColor, fontWeight: design.headerBold ? '900' : 'normal', fontStyle: design.headerItalic ? 'italic' : 'normal', textDecoration: design.headerUnderline ? 'underline' : 'none' }}>
+                        {firmObj.name}
+                      </h1>
+                    )}
+                    <div className="mt-1 flex items-center h-5">
+                      {!design.a4BgUrl && <p className="font-black tracking-wider" style={{ fontSize: '14px', color: '#dc2626' }}>Fire And Safety</p>}
+                    </div>
+                  </div>
+                  <div className="text-right self-end" style={{ fontFamily: design.docFont, fontSize: `${Math.max(10, docS - 3)}px`, color: design.docColor, fontWeight: design.docBold ? 'bold' : 'normal', fontStyle: design.docItalic ? 'italic' : 'normal', textDecoration: design.docUnderline ? 'underline' : 'none' }}>
+                    <p>Date :- <span>{cert.date || 'DD-MM-YYYY'}</span></p>
+                    <p>SR.No :- <span>{cert.ref || '-----'}</span></p>
+                  </div>
+                </div>
+
+                {design.a4BgUrl && <div className="h-10"></div>}
+
+                <div className="w-full mb-4 leading-[1.6] pl-[5mm] pr-[15px] flex-shrink-0">
+                  <p style={{ fontFamily: design.docFont, color: design.docColor, fontSize: `${docS}px`, fontWeight: design.docBold ? 'bold' : 'normal', fontStyle: design.docItalic ? 'italic' : 'normal', textDecoration: design.docUnderline ? 'underline' : 'none' }}>
+                    Certified M/s:- <span className="ml-2 uppercase" style={{ fontFamily: design.custFont, fontSize: `${design.custSize}px`, color: design.custColor, fontWeight: design.custBold ? 'bold' : 'normal', fontStyle: design.custItalic ? 'italic' : 'normal', textDecoration: design.custUnderline ? 'underline' : 'none' }}>{cert.party || 'CUSTOMER NAME'}</span>
+                  </p>
+                  <p className="mt-1" style={{ fontFamily: design.docFont, color: design.docColor, fontSize: `${docS}px`, fontWeight: design.docBold ? 'bold' : 'normal', fontStyle: design.docItalic ? 'italic' : 'normal', textDecoration: design.docUnderline ? 'underline' : 'none' }}>
+                    Address :- <span className="ml-2 uppercase" style={{ fontFamily: design.custFont, fontSize: `${design.custSize}px`, color: design.custColor, fontWeight: design.custBold ? 'bold' : 'normal', fontStyle: design.custItalic ? 'italic' : 'normal', textDecoration: design.custUnderline ? 'underline' : 'none' }}>{getCustomerAddress(cert.party) || 'Address'}</span>
+                  </p>
+                </div>
+
+                <div className="w-full leading-[1.5] mb-4 text-center px-4 flex-shrink-0" style={{ fontFamily: design.docFont, color: design.docColor, fontSize: `${docS}px`, fontWeight: design.docBold ? 'bold' : 'normal', fontStyle: design.docItalic ? 'italic' : 'normal', textDecoration: design.docUnderline ? 'underline' : 'none' }}>
+                  <p>We certify that the fire extinguishers mentioned below</p>
+                  <p>Are tested and refilled as per the relevant Indian standard.</p>
+                  <p>This extinguishers are refilled on Date :- <span className="font-mono" style={{ color: '#dc2626' }}>{cert.date || 'DD-MM-YYYY'}</span></p>
+                  <p>And Warranty will stand valid up to Date :- <span className="font-mono" style={{ color: '#dc2626' }}>{cert.validDate || 'DD-MM-YYYY'}</span></p>
+                  <p>Provided the seal is unbroken and in satisfactory condition.</p>
+                </div>
+
+                <div className="w-full pr-[5mm] flex-shrink-0 z-30 relative">
+                  <table className="cert-table">
+                    <thead>
+                      <tr>
+                        <th style={{ width: '45%' }}>Extinguisher Type</th>
+                        <th style={{ width: '30%' }}>Capacity</th>
+                        <th style={{ width: '25%' }}>Qty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td className="left-align" style={{ fontStyle: 'italic', fontWeight: 'bold' }}>Hy. Test</td>
+                        <td colSpan="2" style={{ fontWeight: 'bold' }}>{items.hyTest}</td>
+                      </tr>
+                      <tr>
+                        <td className="left-align" style={{ fontStyle: 'italic', fontWeight: 'bold' }}>Parts</td>
+                        <td colSpan="2" style={{ fontWeight: 'bold' }}>{items.parts}</td>
+                      </tr>
+                      <tr>
+                        <td className="left-align" style={{ fontStyle: 'italic', fontWeight: 'bold' }}>Remark</td>
+                        <td colSpan="2" style={{ fontWeight: 'bold' }}>{items.remark}</td>
+                      </tr>
+                      {categories.map((cat) => {
+                        const rows = items.items && items.items[cat] ? items.items[cat].filter(r => r.cap || r.qty) : [];
+                        const capStr = rows.map(r => r.cap).filter(Boolean).join(', ');
+                        const qtyStr = rows.map(r => r.qty).filter(Boolean).join(' + ');
+                        
+                        return (
+                          <tr key={cat}>
+                            <td className="left-align" style={{ fontWeight: '500', fontStyle: 'italic' }}>{cat}</td>
+                            <td style={{ fontWeight: 'bold' }}>{capStr}</td>
+                            <td style={{ fontWeight: 'bold' }}>{qtyStr}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="mt-auto pt-4 flex justify-between items-end z-20 relative">
+                  <div className="font-mono" style={{ fontSize: `${Math.max(9, Math.floor(docS * 0.65))}px`, color: '#64748b' }}>
+                    {!design.a4BgUrl && (
+                      <>
+                        <p>{firmObj.address}</p>
+                        <p>{firmObj.contact}</p>
+                      </>
+                    )}
+                  </div>
+                  <div 
+                    className="ml-auto text-center min-w-[220px]" 
+                    style={{ 
+                      fontFamily: design.sigFont || 'Arial', 
+                      color: design.sigColor || '#000000',
+                      transform: `translate(${design.sigX || 0}px, ${design.sigY || 0}px)`
+                    }}
+                  >
+                    <p style={{ 
+                      fontSize: `${design.sigSize || 14}px`, 
+                      fontWeight: design.sigBold ? '900' : 'normal', 
+                      fontStyle: design.sigItalic ? 'italic' : 'normal',
+                      textDecoration: design.sigUnderline ? 'underline' : 'none',
+                      wordBreak: 'break-word',
+                      lineHeight: '1.2'
+                    }}>
+                      For {firmObj.name}
+                    </p>
+                    <div className="h-12"></div>
+                    <p style={{ 
+                      fontSize: `${design.sigSize || 14}px`, 
+                      fontWeight: design.sigBold ? '900' : 'normal', 
+                      fontStyle: design.sigItalic ? 'italic' : 'normal',
+                      textDecoration: design.sigUnderline ? 'underline' : 'none'
+                    }}>
+                      Authorised Signature
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+      );
+  };
+
   return (
     <div className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
       <div className="max-w-7xl mx-auto pb-10">
+
+        {activePreviewCert && (
+          <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', opacity: 0, pointerEvents: 'none' }}>
+            {renderA4PageForReminder(activePreviewCert)}
+          </div>
+        )}
+
         <div className="flex flex-col gap-4 bg-white rounded-2xl p-6 shadow-sm border border-slate-200 mb-6">
           <div className="flex justify-between items-center w-full flex-wrap gap-4">
             <div className="flex items-center gap-4 flex-wrap">
@@ -502,7 +860,6 @@ export default function Reminder({ selectedFY }) {
 
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
           
-          {/* 🟢 DESKTOP TABLE VIEW */}
           <div className="hidden md:block overflow-x-auto custom-scrollbar">
             <table className="w-full text-left text-xs whitespace-nowrap min-w-[800px]">
               <thead className="bg-slate-50 text-slate-500 uppercase tracking-widest text-[10px] font-black border-b border-slate-200">
@@ -588,7 +945,6 @@ export default function Reminder({ selectedFY }) {
               </tbody>
             </table>
 
-            {/* Desktop Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between p-4 bg-slate-50 border-t border-slate-200">
                 <button 
@@ -612,7 +968,6 @@ export default function Reminder({ selectedFY }) {
             )}
           </div>
 
-          {/* 🟢 MOBILE CARD VIEW */}
           <div className="block md:hidden p-3 space-y-3 bg-slate-50">
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between">
               <label className="flex items-center gap-2.5 cursor-pointer text-xs font-black uppercase text-slate-700">
@@ -723,7 +1078,6 @@ export default function Reminder({ selectedFY }) {
               })
             )}
 
-            {/* Mobile Pagination */}
             {totalPages > 1 && (
               <div className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200 shadow-sm mt-4">
                 <button 
@@ -749,7 +1103,6 @@ export default function Reminder({ selectedFY }) {
 
         </div>
 
-        {/* 🔥 NON-RETURNING / LOST CUSTOMERS MODAL */}
         {isNeverReturnModalOpen && (
           <div className="fixed inset-0 z-[99999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
             <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[85vh] overflow-hidden">

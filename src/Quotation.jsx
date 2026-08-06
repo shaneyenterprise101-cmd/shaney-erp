@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import { toJpeg } from 'html-to-image';
 import { SyncManager } from './SyncManager';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
@@ -155,16 +157,13 @@ const getProductRateForFirm = (prod, firmId, firmName, firmsList) => {
     const cleanId = String(firmId || '').trim();
     const cleanName = String(firmName || '').trim().toLowerCase();
 
-    // 1. Direct ID match
     if (prod.rates[cleanId] !== undefined && prod.rates[cleanId] !== '' && prod.rates[cleanId] !== null) {
         return parseFloat(prod.rates[cleanId]) || 0;
     }
-    // 2. Direct Name match
     if (firmName && prod.rates[firmName] !== undefined && prod.rates[firmName] !== '' && prod.rates[firmName] !== null) {
         return parseFloat(prod.rates[firmName]) || 0;
     }
 
-    // 3. Case-insensitive key scan inside rates object
     const foundKey = Object.keys(prod.rates).find(k => {
         const ck = String(k).trim().toLowerCase();
         return ck === cleanId.toLowerCase() || ck === cleanName;
@@ -173,14 +172,12 @@ const getProductRateForFirm = (prod, firmId, firmName, firmsList) => {
         return parseFloat(prod.rates[foundKey]) || 0;
     }
 
-    // 4. Match via firms list
     const matchedFirm = firmsList.find(f => f.id === cleanId || (f.name && f.name.trim().toLowerCase() === cleanName));
     if (matchedFirm) {
         if (prod.rates[matchedFirm.id] !== undefined && prod.rates[matchedFirm.id] !== null) return parseFloat(prod.rates[matchedFirm.id]) || 0;
         if (prod.rates[matchedFirm.name] !== undefined && prod.rates[matchedFirm.name] !== null) return parseFloat(prod.rates[matchedFirm.name]) || 0;
     }
 
-    // 5. Fallback to first available rate
     const firstVal = Object.values(prod.rates)[0];
     return firstVal !== undefined && firstVal !== null && firstVal !== '' ? parseFloat(firstVal) || 0 : 0;
 };
@@ -444,7 +441,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
 
   const activeFirmObj = firms.find(f => f.id === formData.activeFirmId) || { name: 'FIRM NAME', address: 'Address', contact: '', gstRate: 18, dayOffset: 0 };
 
-  // 🟢 ROBUST DESIGN RESOLUTION (Matches activeFirmId + '_quotation' templateKey)
   const templateKey = `${formData.activeFirmId}_quotation`;
   const currentDesign = firmTemplates[templateKey] || firmTemplates[formData.activeFirmId] || {
     themeColor: '#1e40af',
@@ -538,11 +534,9 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     }
   }, [formData.activeFirmId, editingQuoteId, viewMode, firms, products]);
 
-  // 🟢 FIRM CHANGE AUTO-RATE RECALCULATION EFFECT
   useEffect(() => {
     if (viewMode === 'create' && items.length > 0) {
       const activeId = formData.activeFirmId;
-      const activeName = activeFirmObj.name ? activeFirmObj.name.trim().toLowerCase() : '';
       const firmGst = activeFirmObj.gstRate !== undefined ? Number(activeFirmObj.gstRate) : 18;
 
       const updatedItems = items.map(it => {
@@ -803,6 +797,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     }
   };
 
+  // 🟢 CAPACITOR NATIVE SHARE & CLIPBOARD INTEGRATION FOR QUOTATION
   const handleWhatsAppSend = async (e, quote) => {
     e.stopPropagation(); 
     let allHistory = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
@@ -830,15 +825,94 @@ export default function Quotation({ selectedFY, initialViewMode }) {
       logActionToBackend(`Sent WhatsApp for Quotation Ref: ${quote.ref}`);
     }
 
-    const cData = customers.find(c => c.name.toLowerCase() === quote.party.toLowerCase());
-    const phone = cData?.contact || cData?.phone || '';
-    const baseUrl = BACKEND_URL;
-    const docLink = `${baseUrl}/preview/${quote.id}`;
-    const msg = `Hello ${quote.party},\n\nPlease find attached your Quotation (Ref: ${quote.ref}).\n\n📄 View Document:\n🔗 ${docLink}\n\nThank you!\n- ${quote.vendor}`;
-    
-    setTimeout(() => {
-      window.open(`https://wa.me/${phone ? '91'+phone.replace(/\D/g,'') : ''}?text=${encodeURIComponent(msg)}`, '_blank');
-    }, 1000);
+    setActivePreviewQuote(quote);
+
+    setTimeout(async () => {
+      let element = document.getElementById('background-pdf-render-area') || document.getElementById('drawer-quote-print-area') || document.getElementById('create-quote-print-area');
+      
+      if (!element) {
+        setActivePreviewQuote(null);
+        alert("Could not render document for sharing.");
+        return;
+      }
+
+      try {
+        document.body.style.cursor = 'wait';
+        const scaleWrapper = element.parentElement;
+        const originalClassName = scaleWrapper ? scaleWrapper.className : '';
+        const originalTransform = scaleWrapper ? scaleWrapper.style.transform : '';
+
+        if (scaleWrapper) {
+          scaleWrapper.className = originalClassName.replace(/scale-\[[^\]]+\]/g, '').replace(/transform/g, '');
+          scaleWrapper.style.transform = 'none';
+        }
+
+        await new Promise(r => setTimeout(r, 300));
+
+        const dataUrl = await toJpeg(element, {
+          quality: 0.85,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff'
+        });
+
+        if (scaleWrapper) {
+          scaleWrapper.className = originalClassName;
+          scaleWrapper.style.transform = originalTransform;
+        }
+
+        const pdf = new jsPDF({
+          orientation: 'p',
+          unit: 'mm',
+          format: 'a4',
+          compress: true
+        });
+
+        const imgProps = pdf.getImageProperties(dataUrl);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+        pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+        
+        const msg = `Hello ${quote.party},\n\nPlease find attached your Quotation (Ref: ${quote.ref}).\n\nThank you!\n- ${quote.vendor}`;
+
+        const base64Pdf = pdf.output('datauristring').split(',')[1];
+        const filename = `${(quote.party || 'Customer').replace(/[^a-zA-Z0-9-_]/g, '_')}_${(quote.ref || 'Quote').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+
+        await Filesystem.writeFile({
+          path: filename,
+          data: base64Pdf,
+          directory: Directory.Cache,
+          recursive: true
+        });
+
+        const fileUri = await Filesystem.getUri({
+          directory: Directory.Cache,
+          path: filename
+        });
+
+        document.body.style.cursor = 'default';
+        setActivePreviewQuote(null);
+
+        try {
+          await navigator.clipboard.writeText(msg);
+        } catch (clipErr) {
+          console.log("Clipboard write failed:", clipErr);
+        }
+
+        await Share.share({
+          title: 'Quotation',
+          text: msg,
+          url: fileUri.uri,
+          dialogTitle: 'Share via WhatsApp'
+        });
+
+      } catch (err) {
+        console.error("Capacitor Share failed:", err);
+        document.body.style.cursor = 'default';
+        setActivePreviewQuote(null);
+        alert(`Could not share PDF. Reason: ${err.message || err}`);
+      }
+    }, 400);
   };
 
   const handleSort = (key) => {
@@ -995,7 +1069,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
           const cloudData = await res.json();
           if (cloudData && cloudData.data) {
             quoteToView = cloudData.data;
-            // 🟢 PERMANENT SECURITY CACHING: Save locally so it never hits the server again
             localStorage.setItem(localKey, JSON.stringify(quoteToView));
           }
         }
@@ -1030,7 +1103,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
             
             <div className="absolute top-0 left-0 right-0 h-2" style={{ background: design.quoteThemeColor || design.themeColor }}></div>
             
-            {/* 🟢 DRAGGABLE LOGO & STAMP FOR QUOTATION */}
             {['logo', 'stamp'].map((k) => {
               const slot = design.graphics?.[k];
               if (!slot || !slot.url) return null;
@@ -1121,7 +1193,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                 {design.quoteTermText || '* Terms & Conditions: Validity 30 days.'}
               </div>
               <div 
-                className="ml-auto text-center min-w-[220px]" 
                 style={{ 
                   fontFamily: design.sigFont || 'Arial', 
                   color: design.sigColor || '#000000',
@@ -1175,6 +1246,21 @@ export default function Quotation({ selectedFY, initialViewMode }) {
 
       <div className="max-w-7xl mx-auto pb-10">
 
+        {activePreviewQuote && !isPreviewOpen && (
+          <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', opacity: 0, pointerEvents: 'none' }}>
+            {renderA4Quotation({
+                firmObj: firms.find(f => f.name === activePreviewQuote.vendor) || firms[0] || {},
+                design: firmTemplates[`${firms.find(f => f.name === activePreviewQuote.vendor)?.id || ''}_quotation`] || firmTemplates[firms.find(f => f.name === activePreviewQuote.vendor)?.id] || currentDesign,
+                party: activePreviewQuote.party,
+                address: getCustomerAddress(activePreviewQuote.party),
+                contact: customers.find(c => c.name.toLowerCase() === (activePreviewQuote.party||'').toLowerCase())?.contact || '',
+                date: activePreviewQuote.date,
+                ref: activePreviewQuote.ref,
+                itemsData: activePreviewQuote.itemsData ? JSON.parse(activePreviewQuote.itemsData) : []
+            }, 'background-pdf-render-area', false)}
+          </div>
+        )}
+
         {isPreviewOpen && activePreviewQuote && (
           <div className="fixed inset-0 z-[99999] flex justify-end bg-slate-900/70 backdrop-blur-sm transition-all duration-300">
             <div className="w-[850px] max-w-full h-full bg-slate-100 flex flex-col shadow-2xl animate-[slideInRight_0.3s]">
@@ -1207,7 +1293,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                 </button>
                 <div className="flex gap-2 w-full sm:w-auto">
                   <button onClick={(e) => handleWhatsAppSend(e, activePreviewQuote)} className="flex-1 sm:flex-none bg-[#25D366] text-white hover:bg-green-600 px-5 py-2.5 rounded-lg text-xs font-black uppercase transition-all shadow-md flex items-center justify-center gap-2">
-                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                    <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                     WhatsApp
                   </button>
                   <button onClick={() => {

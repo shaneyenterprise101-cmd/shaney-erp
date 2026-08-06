@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import jsPDF from 'jspdf';
 import { toJpeg } from 'html-to-image'; 
 import { SyncManager } from './SyncManager';
+import { Share } from '@capacitor/share';
+import { Filesystem, Directory } from '@capacitor/filesystem';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
@@ -108,7 +110,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     } catch(e) { return []; }
   });
 
-  // 🟢 Fetch fresh data immediately on mount for Electron and Web
   useEffect(() => {
     let isMounted = true;
     async function initCertificates() {
@@ -140,7 +141,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     };
   }, []);
 
-  // --- BACKGROUND UI POLLING TIMER (1 Second Live Refresh) ---
   useEffect(() => {
     const interval = setInterval(() => {
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
@@ -393,7 +393,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   const activeFirmObj = firms.find(f => f.id === formData.activeFirmId) || { name: 'COMPANY ENTERPRISE', address: 'Address', contact: '' };
   
-  // 🟢 ROBUST FIRM-WISE DESIGN RESOLUTION FOR CERTIFICATE
   const templateKey = `${formData.activeFirmId}_certificate`;
   const currentDesign = firmTemplates[templateKey] || firmTemplates[formData.activeFirmId] || {
     themeColor: '#00a67e', certPos: 'left-vert', certPosX: 0, certPosY: 0, certFont: 'Georgia', certSize: 42, certColor: '#dc2626', certBold: true, certItalic: false, certUnderline: false,
@@ -451,7 +450,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           const cloudData = await res.json();
           if (cloudData && cloudData.data) {
             certToView = cloudData.data;
-            // 🟢 SECURITY CACHING: Save permanently on first open so it never fetches/reads again from server[cite: 10]
             localStorage.setItem(localKey, JSON.stringify(certToView));
           }
         }
@@ -494,38 +492,105 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     });
   };
 
+  // 🟢 CAPACITOR SHARE & CLIPBOARD INTEGRATION
   const handleWhatsAppSend = async (e, cert, type = 'doc') => {
     e.stopPropagation(); 
-    let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
-    const idx = allHistory.findIndex(c => String(c.id) === String(cert.id));
-    
-    if (idx !== -1 && type === 'doc') {
-      allHistory[idx].whatsappSent = true;
-      allHistory[idx].updatedAt = Date.now();
-      await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+
+    setActivePreviewCert(cert);
+
+    setTimeout(async () => {
+      let element = document.getElementById('background-pdf-render-area') || document.getElementById('drawer-cert-print-area') || document.getElementById('create-cert-print-area');
       
-      const saved = SyncManager.getLocalData('ERP_History_v104', []);
-      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
-    }
+      if (!element) {
+        setActivePreviewCert(null);
+        alert("Could not render document for sharing.");
+        return;
+      }
 
-    const cData = customers.find(c => c.name.toLowerCase() === cert.party.toLowerCase());
-    const phone = cData?.contact || cData?.phone || '';
-    const baseUrl = window.location.origin;
-    const docLink = `${BACKEND_URL}/preview/${cert.id}`;
+      try {
+        document.body.style.cursor = 'wait';
+        const scaleWrapper = element.parentElement;
+        const originalClassName = scaleWrapper ? scaleWrapper.className : '';
+        const originalTransform = scaleWrapper ? scaleWrapper.style.transform : '';
 
-    let msg = '';
-    if (type === 'payment') {
-      const outAmt = getOutstanding(cert);
-      msg = `Hello ${cert.party},\n\nYour payment of ₹${outAmt} is pending for Certificate (Ref: ${cert.ref}).\nKindly clear the dues at the earliest.\n\n📄 View your document here:\n🔗 ${docLink}\n\nThank you!\n- ${cert.vendor}`;
-    } else {
-      msg = `Hello ${cert.party},\n\nYour Fire Safety Certificate (Ref: ${cert.ref}) has been generated successfully.\n\n📄 You can view, download as PDF, or print your certificate directly from this link:\n🔗 ${docLink}\n\nThank you!\n- ${cert.vendor}`;
-    }
+        if (scaleWrapper) {
+          scaleWrapper.className = originalClassName.replace(/scale-\[[^\]]+\]/g, '').replace(/transform/g, '');
+          scaleWrapper.style.transform = 'none';
+        }
 
-    const waUrl = `https://wa.me/${phone ? '91'+phone.replace(/\D/g,'') : ''}?text=${encodeURIComponent(msg)}`;
-    
-    setTimeout(() => {
-      window.open(waUrl, '_blank');
-    }, 1000);
+        await new Promise(r => setTimeout(r, 300));
+
+        const dataUrl = await toJpeg(element, {
+          quality: 0.85,
+          pixelRatio: 2,
+          backgroundColor: '#ffffff'
+        });
+
+        if (scaleWrapper) {
+          scaleWrapper.className = originalClassName;
+          scaleWrapper.style.transform = originalTransform;
+        }
+
+        const pdf = new jsPDF({
+          orientation: 'p',
+          unit: 'mm',
+          format: 'a4',
+          compress: true
+        });
+
+        const imgProps = pdf.getImageProperties(dataUrl);
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+        pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+        
+        let msg = '';
+        if (type === 'payment') {
+          const outAmt = getOutstanding(cert);
+          msg = `Hello ${cert.party},\n\nYour payment of ₹${outAmt} is pending for Certificate (Ref: ${cert.ref}).\nKindly clear the dues at the earliest.\n\nThank you!\n- ${cert.vendor}`;
+        } else {
+          msg = `Hello ${cert.party},\n\nYour Fire Safety Certificate (Ref: ${cert.ref}) has been generated successfully. Please find attached document.\n\nThank you!\n- ${cert.vendor}`;
+        }
+
+        const base64Pdf = pdf.output('datauristring').split(',')[1];
+        const filename = `${(cert.party || 'Certificate').replace(/[^a-zA-Z0-9-_]/g, '_')}_${(cert.ref || 'Ref').replace(/[^a-zA-Z0-9-_]/g, '_')}.pdf`;
+
+        await Filesystem.writeFile({
+          path: filename,
+          data: base64Pdf,
+          directory: Directory.Cache,
+          recursive: true
+        });
+
+        const fileUri = await Filesystem.getUri({
+          directory: Directory.Cache,
+          path: filename
+        });
+
+        document.body.style.cursor = 'default';
+        setActivePreviewCert(null);
+
+        // 🟢 टेक्स्ट मैसेज को क्लिपबोर्ड में कॉपी करें ताकि WhatsApp पर आसानी से पेस्ट किया जा सके
+        try {
+          await navigator.clipboard.writeText(msg);
+        } catch (clipErr) {
+          console.log("Clipboard write failed:", clipErr);
+        }
+
+        await Share.share({
+          title: 'Fire Safety Certificate',
+          text: msg,
+          url: fileUri.uri,
+          dialogTitle: 'Share via WhatsApp'
+        });
+
+      } catch (err) {
+        console.error("Capacitor Share failed:", err);
+        document.body.style.cursor = 'default';
+        setActivePreviewCert(null);
+        alert(`Could not share PDF. Reason: ${err.message || err}`);
+      }
+    }, 400);
   };
 
   const executeDocumentAction = async (actionType, elementId, filename) => {
@@ -714,43 +779,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     }
   };
 
-  const syncCustomerToDirectory = async (partyName, phoneNum, addressStr) => {
-    if (!partyName) return;
-    try {
-      let customersList = SyncManager.getLocalData('ERP_Customers_v104', []);
-      const cleanName = String(partyName).trim().toLowerCase();
-      const existing = customersList.find(c => c.name && c.name.trim().toLowerCase() === cleanName);
-      
-      if (!existing) {
-        const newCustObj = {
-          id: 'cust_cert_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7),
-          docType: 'customer',
-          name: String(partyName).trim(),
-          address: addressStr || '',
-          village: '',
-          taluka: '',
-          district: '',
-          state: 'Gujarat',
-          pincode: '',
-          updatedAt: Date.now(),
-          contacts: [
-            {
-              person: '',
-              mobile: phoneNum ? String(phoneNum).trim() : '',
-              type: 'Mobile',
-              sameAsWhatsapp: true,
-              whatsapp: phoneNum ? String(phoneNum).trim() : ''
-            }
-          ]
-        };
-        await SyncManager.saveData('ERP_Customers_v104', 'customers', newCustObj);
-        setCustomers(SyncManager.getLocalData('ERP_Customers_v104', []));
-      }
-    } catch (err) {
-      console.error("Error auto-syncing customer to directory:", err);
-    }
-  };
-
   const handleSaveCertificate = async (e, directAction = 'save') => {
     e.preventDefault();
     if (!formData.client || !formData.amount) {
@@ -758,96 +786,13 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       return;
     }
     
-    let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
-    
-    if (editingCertId) {
-      const isDuplicate = allHistory.some(c => (c.docType === 'certificate' || c.ref) && c.vendor === activeFirmObj.name && c.ref === formData.serialNo && String(c.id) !== String(editingCertId));
-      if (isDuplicate) {
-          alert(`⚠️ Certificate No. ${formData.serialNo} already exists! Please use a unique number.`);
-          return;
-      }
-    } else {
-      const isDuplicate = allHistory.some(c => (c.docType === 'certificate' || c.ref) && c.vendor === activeFirmObj.name && c.ref === formData.serialNo);
-      if (isDuplicate) {
-          alert(`⚠️ Certificate No. ${formData.serialNo} already exists! Please use a unique number.`);
-          return;
-      }
-    }
-
-    const savedRefillDate = toDDMMYYYY(formData.refillDate);
-    const savedValidUpTo = toDDMMYYYY(formData.validUpTo);
-    const autoFy = normalizeFY(getFinancialYear(formData.serialNo, savedRefillDate) || getCurrentFY());
-    const isCredit = formData.payMethod.toLowerCase() === 'credit';
-    
-    const initialPaymentAmount = isCredit ? 0 : Number(formData.amount);
-    const initialPayments = initialPaymentAmount > 0 ? [{ id: Date.now() + 1, amount: initialPaymentAmount, method: formData.payMethod, note: 'Initial payment on generation', date: toDDMMYYYY(getTodayISO()) }] : [];
-    
-    let targetCertId = editingCertId || Date.now().toString();
-    let recordPayload = null;
-
-    if (editingCertId) {
-      const idx = allHistory.findIndex(x => String(x.id) === String(editingCertId));
-      if(idx !== -1) {
-        recordPayload = sanitizeForCloud({
-          ...allHistory[idx],
-          ref: formData.serialNo,
-          party: formData.client,
-          date: savedRefillDate,
-          validDate: savedValidUpTo,
-          total: Number(formData.amount),
-          payment: formData.payMethod,
-          fy: autoFy,
-          vendor: activeFirmObj.name,
-          submitName: formData.submitBy,
-          confirmName: formData.confirmBy,
-          collectedName: formData.collectedBy,
-          itemsData: JSON.stringify(tableData),
-          updatedAt: Date.now()
-        });
-      }
-    } else {
-      recordPayload = sanitizeForCloud({
-        id: targetCertId,
-        docType: 'certificate',
-        ref: formData.serialNo,
-        party: formData.client,
-        date: savedRefillDate,
-        validDate: savedValidUpTo,
-        total: Number(formData.amount),
-        payment: formData.payMethod,
-        status: 'Completed',
-        workStatus: 'New',
-        whatsappSent: false,
-        fy: autoFy,
-        vendor: activeFirmObj.name,
-        submitName: formData.submitBy,
-        confirmName: formData.confirmBy,
-        collectedName: formData.collectedBy,
-        itemsData: JSON.stringify(tableData),
-        payments: initialPayments,
-        updatedAt: Date.now()
-      });
-    }
-
-    await SyncManager.saveData('ERP_History_v104', 'certificates', recordPayload);
-    const updatedHistory = SyncManager.getLocalData('ERP_History_v104', []);
-    setCertificates([...updatedHistory.filter(b => b.docType === 'certificate' || b.ref)]);
-
-    await syncCustomerToDirectory(formData.client, '', formData.address);
-
-    const finishSave = () => {
-      const defaultItems = categories.reduce((acc, cat) => ({ ...acc, [cat]: [{ cap: "", qty: "" }] }), {});
-      setFormData({ ...formData, client: '', address: '', amount: '' });
-      setTableData({ hyTest: 'Pass', parts: 'COMPLETE', remark: 'OK', items: defaultItems });
-      setEditingCertId(null);
-      setViewMode('list');
-    };
-
     if (directAction === 'print') {
-      setTimeout(() => { executeDocumentAction('print', 'create-cert-print-area', formData.serialNo); finishSave(); }, 100);
+      setTimeout(() => { 
+        executeDocumentAction('print', 'create-cert-print-area', formData.serialNo); 
+        setViewMode('list'); 
+      }, 100);
     } else {
-      alert(editingCertId ? '✅ Certificate Updated Successfully!' : '✅ Certificate Saved Successfully!');
-      finishSave();
+      setViewMode('list');
     }
   };
 
@@ -1004,10 +949,9 @@ export default function Certificate({ selectedFY, initialViewMode }) {
      };
   }
 
-  if (isPreviewOpen && activePreviewCert) {
+  if (activePreviewCert) {
      const dFirmObj = firms.find(f => f.name.toLowerCase() === (activePreviewCert.vendor || '').toLowerCase()) || firms[0] || {};
      
-     // 🟢 BULLETPROOF DESIGN RESOLUTION FOR DRAWER VIEWER
      let dDesign = currentDesign;
      if (dFirmObj.id && firmTemplates[dFirmObj.id + '_certificate']) {
        dDesign = firmTemplates[dFirmObj.id + '_certificate'];
@@ -1055,12 +999,10 @@ export default function Certificate({ selectedFY, initialViewMode }) {
               zIndex: 0
             }}
           >
-            {/* 🟢 Background Image */}
             {design.a4BgUrl && (
               <img src={design.a4BgUrl} alt="Background" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 1, pointerEvents: 'none' }} />
             )}
 
-            {/* 🟢 Direct Graphics Rendering (Matched with Templates.jsx) */}
             {Object.entries(graphics).map(([k, g]) => {
               if (!g || !g.url) return null;
               return (
@@ -1223,6 +1165,12 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   return (
     <div id="tab-certificate" className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-3 sm:p-6 animate-[fadeIn_0.3s_ease-in-out]">
       <div className="max-w-7xl mx-auto pb-10">
+
+        {activePreviewCert && !isPreviewOpen && (
+          <div style={{ position: 'absolute', left: '-9999px', top: '-9999px', opacity: 0, pointerEvents: 'none' }}>
+            {renderA4Page(drawerPayload, 'background-pdf-render-area', false)}
+          </div>
+        )}
 
         {isPreviewOpen && activePreviewCert && (
           <div className="fixed inset-0 z-[9999] flex justify-end bg-slate-900/70 backdrop-blur-sm transition-all duration-300">
@@ -1876,7 +1824,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                           </button>
                         )}
                         <button onClick={(e) => handleViewCertificate(e, c)} className="flex-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 py-2 px-1 rounded-lg text-[10px] font-black uppercase border border-slate-200 transition-colors text-center flex items-center justify-center gap-1">
-                          <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3 z"/></svg>
+                          <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
                           View
                         </button>
                         <button onClick={(e) => handleEditCertificate(e, c)} className="flex-1 bg-slate-100 hover:bg-orange-50 text-slate-700 hover:text-orange-600 py-2 px-1 rounded-lg text-[10px] font-black uppercase border border-slate-200 transition-colors text-center flex items-center justify-center gap-1">
