@@ -147,7 +147,7 @@ function numberToWords(num) {
     str += (n[4] != 0) ? (a[Number(n[4])] || b[n[4][0]] + ' ' + a[n[4][1]]) + 'Hundred ' : '';
     str += (n[5] != 0) ? ((str != '') ? 'and ' : '') + (a[Number(n[5])] || b[n[5][0]] + ' ' + a[n[5][1]]) + 'Only ' : 'Only';
     return str;
-}
+};
 
 // --- BULLETPROOF FIRM-WISE RATE LOOKUP HELPER ---
 const getProductRateForFirm = (prod, firmId, firmName, firmsList) => {
@@ -832,7 +832,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
 
     const cData = customers.find(c => c.name.toLowerCase() === quote.party.toLowerCase());
     const phone = cData?.contact || cData?.phone || '';
-    const baseUrl = window.location.origin;
+    const baseUrl = BACKEND_URL;
     const docLink = `${baseUrl}/preview/${quote.id}`;
     const msg = `Hello ${quote.party},\n\nPlease find attached your Quotation (Ref: ${quote.ref}).\n\n📄 View Document:\n🔗 ${docLink}\n\nThank you!\n- ${quote.vendor}`;
     
@@ -995,6 +995,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
           const cloudData = await res.json();
           if (cloudData && cloudData.data) {
             quoteToView = cloudData.data;
+            // 🟢 PERMANENT SECURITY CACHING: Save locally so it never hits the server again
             localStorage.setItem(localKey, JSON.stringify(quoteToView));
           }
         }

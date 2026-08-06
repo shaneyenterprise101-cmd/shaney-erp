@@ -51,6 +51,20 @@ const processInBatchesWithProgress = async (items, batchSize = 1, delayMs = 1000
   return results;
 };
 
+// 🟢 Safe Helper for non-progress batch tasks
+const processInBatches = async (items, batchSize = 1, delayMs = 1000, asyncTaskCallback) => {
+  let results = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    const batch = items.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(item => asyncTaskCallback(item)));
+    results.push(...batchResults);
+    if (i + batchSize < items.length) {
+      await new Promise(resolve => setTimeout(resolve, delayMs));
+    }
+  }
+  return results;
+};
+
 // 🟢 Bulletproof Data Sanitizer with Timestamp Fallback
 const sanitizeForCloud = (dataObj) => {
   let cleaned = { ...dataObj };
@@ -90,43 +104,7 @@ export default function Crm({ selectedFY }) {
     try {
       const saved = localStorage.getItem('ERP_CRM_v9');
       let initialCrm = saved ? JSON.parse(saved) : [];
-      initialCrm = initialCrm.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-
-      const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-      const todayTime = new Date().setHours(0, 0, 0, 0);
-
-      history.forEach(b => {
-        if (b.docType === 'certificate' && !b.reminderDone && b.validDate) {
-          const vDateObj = parseSafeDate(b.validDate);
-          if (vDateObj && !isNaN(vDateObj.getTime())) {
-            vDateObj.setHours(0, 0, 0, 0);
-            if (vDateObj.getTime() < todayTime) {
-              const exists = initialCrm.find(c => c.name && b.party && c.name.toLowerCase() === b.party.toLowerCase() && c.isErpOverdue);
-              if (!exists) {
-                initialCrm.push({
-                  id: 'erp_overdue_' + b.id,
-                  docType: 'crm',
-                  name: b.party,
-                  district: b.district || 'OVERDUE',
-                  taluka: 'Certificate Expired',
-                  cluster: '',
-                  p1: 'Owner/Auth',
-                  m1: b.partyNum || b.contact || '',
-                  p2: '',
-                  m2: '',
-                  status: 'Overdue Reminder',
-                  staff: '',
-                  reminderDate: b.validDate,
-                  isErpOverdue: true,
-                  updatedAt: Date.now()
-                });
-              }
-            }
-          }
-        }
-      });
-
-      return initialCrm;
+      return initialCrm.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
     } catch (e) {
       return [];
     }
@@ -142,7 +120,17 @@ export default function Crm({ selectedFY }) {
   });
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [filtReminderDate, setFiltReminderDate] = useState('ALL');
+  
+  // 🟢 Read Preset Filter safely on load (from Dashboard Action Center click)
+  const [filtReminderDate, setFiltReminderDate] = useState(() => {
+    const preset = localStorage.getItem('CRM_PRESET_FILTER');
+    if (preset) {
+      localStorage.removeItem('CRM_PRESET_FILTER');
+      return preset;
+    }
+    return 'ALL';
+  });
+
   const [filtDistrict, setFiltDistrict] = useState('ALL');
   const [filtTaluka, setFiltTaluka] = useState('ALL');
   const [filtCluster, setFiltCluster] = useState('ALL');
@@ -185,6 +173,7 @@ export default function Crm({ selectedFY }) {
   const [rawExcelRows, setRawExcelRows] = useState([]);
   const [previewColumns, setPreviewColumns] = useState([]);
 
+  // 🟢 Fetch Cloud Data for CRM Leads
   useEffect(() => {
     const fetchCrmFromCloud = async () => {
       try {
@@ -223,8 +212,7 @@ export default function Crm({ selectedFY }) {
           const saved = localStorage.getItem('ERP_CRM_v9');
           if (saved) {
             let parsedData = JSON.parse(saved);
-            parsedData = parsedData.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-            setCrmData(parsedData);
+            setCrmData(parsedData.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item)));
           }
         } catch (e) {}
       }
@@ -251,6 +239,46 @@ export default function Crm({ selectedFY }) {
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
+  // 🟢 Build list including dynamic ERP Certificate Overdues on-the-fly when OVERDUE filter is active
+  let activeRecordsList = [...crmData];
+  if (filtReminderDate === 'OVERDUE') {
+    try {
+      const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
+      const todayTime = new Date().setHours(0, 0, 0, 0);
+
+      history.forEach(b => {
+        if (b.docType === 'certificate' && !b.reminderDone && b.validDate) {
+          const vDateObj = parseSafeDate(b.validDate);
+          if (vDateObj && !isNaN(vDateObj.getTime())) {
+            vDateObj.setHours(0, 0, 0, 0);
+            if (vDateObj.getTime() < todayTime) {
+              const exists = activeRecordsList.find(c => c.name && b.party && c.name.toLowerCase() === b.party.toLowerCase() && c.isErpOverdue);
+              if (!exists) {
+                activeRecordsList.push({
+                  id: 'erp_overdue_' + b.id,
+                  docType: 'crm',
+                  name: b.party,
+                  district: b.district || 'OVERDUE',
+                  taluka: 'Certificate Expired',
+                  cluster: '',
+                  p1: 'Owner/Auth',
+                  m1: b.partyNum || b.contact || '',
+                  p2: '',
+                  m2: '',
+                  status: 'Overdue Reminder',
+                  staff: '',
+                  reminderDate: b.validDate,
+                  isErpOverdue: true,
+                  updatedAt: Date.now()
+                });
+              }
+            }
+          }
+        }
+      });
+    } catch (e) {}
+  }
+
   const districts = Array.from(new Set(crmData.map(c => c.district).filter(d => d && d !== 'OVERDUE'))).sort();
   const talukas = Array.from(new Set(
     crmData.filter(c => filtDistrict === 'ALL' || c.district?.toUpperCase() === filtDistrict.toUpperCase())
@@ -262,11 +290,7 @@ export default function Crm({ selectedFY }) {
          .map(c => c.cluster).filter(Boolean)
   )).sort();
 
-  const filteredLeads = crmData.filter(c => {
-    if (c.isErpOverdue && filtReminderDate !== 'OVERDUE') {
-      return false;
-    }
-
+  const filteredLeads = activeRecordsList.filter(c => {
     const distMatch = filtDistrict === 'ALL' || (c.district || '').toUpperCase() === filtDistrict.toUpperCase();
     const talMatch = filtTaluka === 'ALL' || (c.taluka || '').toUpperCase() === filtTaluka.toUpperCase();
     const clusterMatch = filtCluster === 'ALL' || (c.cluster || '').toUpperCase() === filtCluster.toUpperCase();
@@ -286,20 +310,39 @@ export default function Crm({ selectedFY }) {
 
     let dateMatch = true;
     if (filtReminderDate !== 'ALL') {
-      if (!c.reminderDate) {
-        dateMatch = false;
-      } else {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const rDate = parseSafeDate(c.reminderDate);
-        
-        if (!rDate || isNaN(rDate.getTime())) {
+      if (filtReminderDate === 'OVERDUE') {
+        if (c.isErpOverdue) {
+          dateMatch = true;
+        } else if (!c.reminderDate) {
           dateMatch = false;
         } else {
-          rDate.setHours(0, 0, 0, 0);
-          if (filtReminderDate === 'TODAY') dateMatch = rDate.getTime() === today.getTime();
-          else if (filtReminderDate === 'UPCOMING') dateMatch = rDate.getTime() > today.getTime();
-          else if (filtReminderDate === 'OVERDUE') dateMatch = rDate.getTime() < today.getTime();
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const rDate = parseSafeDate(c.reminderDate);
+          if (!rDate || isNaN(rDate.getTime())) {
+            dateMatch = false;
+          } else {
+            rDate.setHours(0, 0, 0, 0);
+            dateMatch = rDate.getTime() < today.getTime();
+          }
+        }
+      } else {
+        if (c.isErpOverdue) {
+          dateMatch = false;
+        } else if (!c.reminderDate) {
+          dateMatch = false;
+        } else {
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          const rDate = parseSafeDate(c.reminderDate);
+          
+          if (!rDate || isNaN(rDate.getTime())) {
+            dateMatch = false;
+          } else {
+            rDate.setHours(0, 0, 0, 0);
+            if (filtReminderDate === 'TODAY') dateMatch = rDate.getTime() === today.getTime();
+            else if (filtReminderDate === 'UPCOMING') dateMatch = rDate.getTime() > today.getTime();
+          }
         }
       }
     }
@@ -366,6 +409,8 @@ export default function Crm({ selectedFY }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'crm_leads', id: String(leadId), data: newLead })
       });
+      // 🟢 PERMANENT SECURITY CACHING: Save locally so it never hits the server again
+      localStorage.setItem(`shaney_crm_${leadId}`, JSON.stringify(newLead));
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', newLead);
@@ -395,6 +440,8 @@ export default function Crm({ selectedFY }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'crm_leads', id: String(id), data: updatedLead })
       });
+      // 🟢 PERMANENT SECURITY CACHING
+      localStorage.setItem(`shaney_crm_${id}`, JSON.stringify(updatedLead));
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', updatedLead);
@@ -476,6 +523,7 @@ export default function Crm({ selectedFY }) {
         localStorage.setItem('ERP_Customers_v104', JSON.stringify(customers));
         try { 
           await fetch(`${BACKEND_URL}/api/data/${lead.id}`, { method: 'DELETE' });
+          localStorage.removeItem(`shaney_crm_${lead.id}`);
           if (window.require) {
             const { ipcRenderer } = window.require('electron');
             if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id: lead.id, deleted: true, updatedAt: Date.now() });
@@ -499,6 +547,7 @@ export default function Crm({ selectedFY }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'crm_leads', id: String(id), data: updatedLead })
       });
+      localStorage.setItem(`shaney_crm_${id}`, JSON.stringify(updatedLead));
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', updatedLead);
@@ -517,6 +566,7 @@ export default function Crm({ selectedFY }) {
 
       try {
         await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
+        localStorage.removeItem(`shaney_crm_${id}`);
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id, deleted: true, updatedAt: Date.now() });
@@ -534,10 +584,10 @@ export default function Crm({ selectedFY }) {
     if (confirm('Delete ' + selectedIds.length + ' selected leads?')) {
       setCrmData(crmData.filter(c => !selectedIds.includes(c.id)));
       
-      // 🟢 1-by-1 Safe Deletion (1 item per 1 second)
       await processInBatches(selectedIds, 1, 1000, async (id) => {
         try { 
           await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
+          localStorage.removeItem(`shaney_crm_${id}`);
           if (window.require) {
             const { ipcRenderer } = window.require('electron');
             if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id, deleted: true, updatedAt: Date.now() });
@@ -556,7 +606,6 @@ export default function Crm({ selectedFY }) {
     const updatedCrm = crmData.map(c => selectedIds.includes(c.id) ? { ...c, staff: bulkStaff === 'UNASSIGNED' ? '' : bulkStaff, updatedAt: currentTimestamp } : c);
     setCrmData(updatedCrm);
 
-    // 🟢 1-by-1 Safe Assignment (1 item per 1 second)
     await processInBatches(selectedIds, 1, 1000, async (id) => {
       const l = sanitizeForCloud(updatedCrm.find(c => c.id === id));
       try { 
@@ -565,6 +614,7 @@ export default function Crm({ selectedFY }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'crm_leads', id: String(id), data: l })
         });
+        localStorage.setItem(`shaney_crm_${id}`, JSON.stringify(l));
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', l);
@@ -619,6 +669,7 @@ export default function Crm({ selectedFY }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'crm_leads', id: String(editForm.id), data: editedLead })
       });
+      localStorage.setItem(`shaney_crm_${editForm.id}`, JSON.stringify(editedLead));
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', editedLead);
@@ -686,6 +737,7 @@ export default function Crm({ selectedFY }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'crm_leads', id: String(foundLead.id), data: updatedLead })
         });
+        localStorage.setItem(`shaney_crm_${foundLead.id}`, JSON.stringify(updatedLead));
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', updatedLead);
@@ -749,6 +801,7 @@ export default function Crm({ selectedFY }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: 'crm_leads', id: String(foundLead.id), data: updatedLead })
         });
+        localStorage.setItem(`shaney_crm_${foundLead.id}`, JSON.stringify(updatedLead));
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', updatedLead);
@@ -785,6 +838,7 @@ export default function Crm({ selectedFY }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'crm_leads', id: String(activeNoteRecord.id), data: updatedLead })
       });
+      localStorage.setItem(`shaney_crm_${activeNoteRecord.id}`, JSON.stringify(updatedLead));
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', updatedLead);
@@ -823,7 +877,6 @@ export default function Crm({ selectedFY }) {
     e.target.value = '';
   };
 
-  // 🟢 1-by-1 Safe Excel Import with Spinning Wheel & Live File/Cloud Counter
   const confirmExcelImport = async () => {
     try {
       setIsImporting(true);
@@ -903,7 +956,6 @@ export default function Crm({ selectedFY }) {
         }
       }
 
-      // 🟢 1-by-1 Sequential Safe Cloud Upload with live counter (1 item per 1 second)
       await processInBatchesWithProgress(leadsToUpload, 1, 1000, async (leadObj) => {
         try { 
           await fetch(`${BACKEND_URL}/api/data`, {
@@ -911,6 +963,7 @@ export default function Crm({ selectedFY }) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ type: 'crm_leads', id: String(leadObj.id), data: leadObj })
           });
+          localStorage.setItem(`shaney_crm_${leadObj.id}`, JSON.stringify(leadObj));
           if (window.require) {
             const { ipcRenderer } = window.require('electron');
             if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', leadObj);
@@ -1308,7 +1361,7 @@ export default function Crm({ selectedFY }) {
                                     <span className="font-bold text-slate-700 text-[10px] uppercase truncate" title={c.p2 || 'Contact 2'}>{c.p2 || 'Contact 2'}</span>
                                     {countM2 > 0 && (
                                       <span className="inline-flex items-center text-[#25D366] bg-green-50 px-1 py-0.2 rounded border border-green-200" title={`WhatsApp sent ${countM2} time(s)`}>
-                                        <svg className="w-3 h-3 fill-current inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.764.966-.937 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
+                                        <svg className="w-3 h-3 fill-current inline" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
                                         <span className="text-[9px] font-black ml-0.5">{countM2}</span>
                                       </span>
                                     )}
@@ -1678,7 +1731,7 @@ export default function Crm({ selectedFY }) {
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-[fadeIn_0.2s_ease-out]">
             <div className="bg-indigo-600 p-4 text-white flex justify-between items-center">
               <h3 className="font-black text-sm uppercase flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2.5 2.5 0 113.536 3.536L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                 Discussion Notes
               </h3>
               <button type="button" onClick={() => setNoteModalOpen(false)} className="font-black text-2xl leading-none cursor-pointer">&times;</button>

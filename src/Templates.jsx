@@ -410,19 +410,35 @@ export default function Templates() {
   };
 
   const [draggingKey, setDraggingKey] = useState(null);
-  const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
+  const [dragOffset, setDragOffset] = useState({ startX: 0, startY: 0, origX: 0, origY: 0, scale: 1 });
 
   const handleMouseDown = (key, e) => {
     e.stopPropagation();
     setDraggingKey(key);
     const g = currentGraphics[key] || { x: 0, y: 0 };
-    setDragOffset({ x: e.clientX - g.x, y: e.clientY - g.y });
+    
+    // 🟢 Scale-aware coordinate fixing
+    const canvasEl = document.getElementById('a4-preview-canvas');
+    const rect = canvasEl ? canvasEl.getBoundingClientRect() : { width: 794 };
+    const scale = rect.width / 794;
+
+    setDragOffset({
+      startX: e.clientX,
+      startY: e.clientY,
+      origX: g.x || 0,
+      origY: g.y || 0,
+      scale: scale || 1
+    });
   };
 
   const handleMouseMove = (e) => {
     if (!draggingKey) return;
-    const newX = e.clientX - dragOffset.x;
-    const newY = e.clientY - dragOffset.y;
+    const dx = (e.clientX - dragOffset.startX) / dragOffset.scale;
+    const dy = (e.clientY - dragOffset.startY) / dragOffset.scale;
+    
+    const newX = dragOffset.origX + dx;
+    const newY = dragOffset.origY + dy;
+
     setCurrentDesign(prev => ({
       ...prev,
       graphics: {
@@ -557,6 +573,7 @@ export default function Templates() {
   const renderA4Content = () => {
     return designMode === 'certificate' ? (
       <div 
+        id="a4-preview-canvas"
         className="bg-white shadow-2xl relative w-[794px] h-[1123px] min-w-[794px] min-h-[1123px] overflow-hidden flex flex-col shrink-0 box-border z-0 p-8"
         style={{
           backgroundImage: currentDesign.a4BgUrl ? `url(${currentDesign.a4BgUrl})` : 'none',

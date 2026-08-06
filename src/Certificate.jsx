@@ -451,6 +451,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           const cloudData = await res.json();
           if (cloudData && cloudData.data) {
             certToView = cloudData.data;
+            // 🟢 SECURITY CACHING: Save permanently on first open so it never fetches/reads again from server[cite: 10]
             localStorage.setItem(localKey, JSON.stringify(certToView));
           }
         }
@@ -510,7 +511,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     const cData = customers.find(c => c.name.toLowerCase() === cert.party.toLowerCase());
     const phone = cData?.contact || cData?.phone || '';
     const baseUrl = window.location.origin;
-    const docLink = `${baseUrl}/preview/${cert.id}`;
+    const docLink = `${BACKEND_URL}/preview/${cert.id}`;
 
     let msg = '';
     if (type === 'payment') {
@@ -1049,27 +1050,43 @@ export default function Certificate({ selectedFY, initialViewMode }) {
             style={{ 
               backgroundColor: '#ffffff',
               width: '794px', height: '1123px', minWidth: '794px', minHeight: '1123px', maxWidth: '794px', maxHeight: '1123px',
-              paddingTop: `${32 + (design.topMargin || 0)}px`,
+              paddingTop: `${20 + (design.topMargin || 0)}px`,
               position: 'relative',
               zIndex: 0
             }}
           >
+            {/* 🟢 Background Image */}
+            {design.a4BgUrl && (
+              <img src={design.a4BgUrl} alt="Background" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', objectFit: 'cover', zIndex: 1, pointerEvents: 'none' }} />
+            )}
+
+            {/* 🟢 Direct Graphics Rendering (Matched with Templates.jsx) */}
+            {Object.entries(graphics).map(([k, g]) => {
+              if (!g || !g.url) return null;
+              return (
+                <img 
+                  key={k} 
+                  src={g.url} 
+                  alt={k} 
+                  style={{ 
+                    position: 'absolute', 
+                    left: `${20 + (g.x || 0)}px`, 
+                    top: `${20 + (g.y || 0)}px`, 
+                    width: `${g.size || 80}px`, 
+                    zIndex: 40, 
+                    objectFit: 'contain',
+                    pointerEvents: 'none'
+                  }} 
+                />
+              );
+            })}
+
             <style dangerouslySetInnerHTML={{__html: `
               .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-family: ${design.docFont}, sans-serif; table-layout: fixed; word-break: break-word; background: transparent; }
               .cert-table th { padding: 4px; text-align: center; border: 1px solid #000; font-size: ${thSize}px; font-weight: bold; color: ${design.docColor}; font-style: ${design.docItalic ? 'italic' : 'normal'}; overflow: hidden; word-break: break-word; background: transparent; }
               .cert-table td { padding: 4px; text-align: center; border: 1px solid #000; font-size: ${tdSize}px; font-weight: ${design.docBold ? 'bold' : 'normal'}; color: ${design.docColor}; font-style: ${design.docItalic ? 'italic' : 'normal'}; text-decoration: ${design.docUnderline ? 'underline' : 'none'}; word-break: break-word; overflow-wrap: break-word; background: transparent; }
               .cert-table td.left-align { text-align: left; padding-left: 10px; }
             `}} />
-
-            <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 1, pointerEvents: 'none' }}>
-              {design.a4BgUrl && (
-                <img src={design.a4BgUrl} alt="Background" style={{ position: 'absolute', left: 0, top: 0, width: '100%', height: '100%', objectFit: 'cover' }} />
-              )}
-              {Object.entries(graphics).map(([k, g]) => {
-                if (!g || !g.url) return null;
-                return <img key={k} src={g.url} alt={k} style={{ position: 'absolute', left: `${20 + (g.x || 0)}px`, top: `${20 + (g.y || 0)}px`, width: `${g.size || 80}px`, objectFit: 'contain' }} />;
-              })}
-            </div>
 
             <div className="flex h-full w-full pt-[20px] pb-[60px] pl-[10px] pr-[20px] flex-row relative" style={{ zIndex: 10 }}>
               

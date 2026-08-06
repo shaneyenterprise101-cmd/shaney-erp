@@ -135,7 +135,11 @@ export default function Dashboard({ currentUser, setActiveTab }) {
               const sqliteRecords = await ipcRenderer.invoke('sqlite-get-records');
               if (sqliteRecords && sqliteRecords.length > 0) {
                 history = sqliteRecords.filter(r => r.docType === 'certificate' || r.docType === 'quotation');
-                crmData = sqliteRecords.filter(r => r.docType === 'crm');
+                const sqliteCrm = sqliteRecords.filter(r => r.docType === 'crm');
+                // 🟢 Fallback to localStorage CRM if SQLite has fewer or zero records
+                if (sqliteCrm.length > crmData.length) {
+                  crmData = sqliteCrm;
+                }
               }
             }
           } catch(e) {}
@@ -272,13 +276,16 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         if (Array.isArray(crmData)) {
           crmData.forEach(c => {
             if (!c) return;
+            // 🟢 Skip ERP generated overdue temporary items from lead count
             if (c.isErpOverdue || (c.id && String(c.id).startsWith('erp_overdue_'))) return;
 
-            if (c.status !== 'Closed' && c.status !== 'Rejected' && !c.isMainErpRecord) {
+            const st = String(c.status || 'new').trim().toLowerCase();
+            // 🟢 Count leads that are not strictly closed or rejected
+            if (st !== 'closed' && st !== 'rejected') {
               activeLeads++;
             }
 
-            if (c.district && c.status !== 'Closed' && c.status !== 'Rejected') {
+            if (c.district && st !== 'closed' && st !== 'rejected') {
               addCount(c.district, 'leads');
             }
           });
@@ -589,7 +596,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
                   onClick={() => handleQuickAction('quotation-create')}
                   className="w-full flex items-center justify-between p-3 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-xl font-bold text-[10px] transition-colors border border-blue-100 uppercase tracking-wider cursor-pointer">
                   <span className="flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"/></svg>
                     CREATE QUOTATION
                   </span>
                   <span>&rarr;</span>
@@ -600,7 +607,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
                   onClick={() => handleQuickAction('crm')}
                   className="w-full flex items-center justify-between p-3 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 rounded-xl font-bold text-[10px] transition-colors border border-emerald-100 uppercase tracking-wider cursor-pointer">
                   <span className="flex items-center gap-2">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z"/></svg>
                     ADD CRM LEAD
                   </span>
                   <span>&rarr;</span>

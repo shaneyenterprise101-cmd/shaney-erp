@@ -6,7 +6,7 @@ import { DynamoDBDocumentClient, GetCommand, PutCommand, ScanCommand } from "@aw
 const app = express();
 app.use(cors());
 
-// 🟢 Increased body payload limit to 50MB to completely eliminate Status 413 errors
+// Increased body payload limit to 50MB to completely eliminate Status 413 errors
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -151,7 +151,7 @@ app.post('/api/logs', (req, res) => {
     }
 });
 
-// 5. Get Data from DynamoDB
+// 5. Get Data from DynamoDB & Public Document Endpoint Support
 app.get('/api/data', async (req, res) => {
     try {
         const { key } = req.query;
@@ -173,6 +173,134 @@ app.get('/api/data', async (req, res) => {
     } catch (err) {
         console.error("GET /api/data error:", err);
         res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// Public JSON Document Fetch Endpoint
+app.get('/api/document/:id', async (req, res) => {
+    try {
+        const docId = req.params.id;
+        const scanResult = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
+        
+        let foundDocument = null;
+        for (const record of scanResult.Items) {
+            if (record.data && Array.isArray(record.data)) {
+                const match = record.data.find(i => String(i.id) === String(docId));
+                if (match) {
+                    foundDocument = match;
+                    break;
+                }
+            }
+        }
+
+        if (!foundDocument) {
+            return res.status(404).json({ success: false, error: "Document not found" });
+        }
+
+        res.json({ success: true, data: foundDocument });
+    } catch (err) {
+        console.error("GET /api/document/:id error:", err);
+        res.status(500).json({ success: false, error: err.message });
+    }
+});
+
+// 🟢 Public HTML Preview Route for WhatsApp Links (Direct Browser Rendering)
+app.get('/preview/:id', async (req, res) => {
+    try {
+        const docId = req.params.id;
+        const scanResult = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
+        
+        let foundDoc = null;
+        for (const record of scanResult.Items) {
+            if (record.data && Array.isArray(record.data)) {
+                const match = record.data.find(i => String(i.id) === String(docId));
+                if (match) {
+                    foundDoc = match;
+                    break;
+                }
+            }
+        }
+
+        if (!foundDoc) {
+            return res.send(`
+                <html>
+                    <head><title>Document Not Found</title><meta name="viewport" content="width=device-width, initial-scale=1"></head>
+                    <body style="font-family:sans-serif; text-align:center; padding:50px; background:#f8fafc;">
+                        <h2 style="color:#dc2626;">Document Not Found</h2>
+                        <p style="color:#64748b;">The link might be expired or the document does not exist.</p>
+                    </body>
+                </html>
+            `);
+        }
+
+        const isCert = foundDoc.docType === 'certificate' || foundDoc.ref;
+        const title = isCert ? "Fire Safety Certificate" : "Quotation";
+        const items = foundDoc.itemsData ? JSON.parse(foundDoc.itemsData) : null;
+
+        let itemsHTML = '';
+        if (isCert && items && items.items) {
+            itemsHTML = `
+                <table style="width:100%; border-collapse:collapse; margin-top:20px; font-size:14px;">
+                    <tr style="background:#f1f5f9;"><th style="border:1px solid #cbd5e1; padding:8px;">Type</th><th style="border:1px solid #cbd5e1; padding:8px;" colspan="2">Details</th></tr>
+                    <tr><td style="border:1px solid #cbd5e1; padding:8px;">Hy. Test</td><td colspan="2" style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${items.hyTest || '-'}</td></tr>
+                    <tr><td style="border:1px solid #cbd5e1; padding:8px;">Parts</td><td colspan="2" style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${items.parts || '-'}</td></tr>
+                    <tr><td style="border:1px solid #cbd5e1; padding:8px;">Remark</td><td colspan="2" style="border:1px solid #cbd5e1; padding:8px; text-align:center; font-weight:bold;">${items.remark || '-'}</td></tr>
+                </table>
+            `;
+        } else if (!isCert && items) {
+            let rows = Array.isArray(items) ? items : [];
+            itemsHTML = `
+                <table style="width:100%; border-collapse:collapse; margin-top:20px; font-size:14px;">
+                    <tr style="background:#f1f5f9;"><th style="border:1px solid #cbd5e1; padding:8px; text-align:left;">Description</th><th style="border:1px solid #cbd5e1; padding:8px;">Qty</th><th style="border:1px solid #cbd5e1; padding:8px;">Rate</th><th style="border:1px solid #cbd5e1; padding:8px;">Amount</th></tr>
+                    ${rows.map(it => `<tr><td style="border:1px solid #cbd5e1; padding:8px;">${it.desc || ''}</td><td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">${it.qty || 0}</td><td style="border:1px solid #cbd5e1; padding:8px; text-align:center;">₹${it.rate || 0}</td><td style="border:1px solid #cbd5e1; padding:8px; text-align:right;">₹${Number(it.amount||0).toFixed(2)}</td></tr>`).join('')}
+                </table>
+            `;
+        }
+
+        res.send(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <title>${title} - ${foundDoc.vendor || 'Shaney Enterprise'}</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <style>
+                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #e2e8f0; margin: 0; padding: 20px; display: flex; justify-content: center; }
+                    .card { background: #ffffff; width: 100%; max-width: 750px; padding: 40px; border-radius: 16px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+                    .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #00a67e; padding-bottom: 20px; margin-bottom: 20px; }
+                    .firm-name { font-size: 22px; font-weight: 900; text-transform: uppercase; color: #0f172a; margin: 0; }
+                    .doc-title { font-size: 14px; font-weight: bold; color: #dc2626; margin-top: 5px; }
+                    .meta { text-align: right; font-size: 13px; color: #475569; }
+                    .details { font-size: 14px; line-height: 1.6; color: #334155; margin-bottom: 20px; }
+                    .total { text-align: right; font-size: 18px; font-weight: 900; color: #0f172a; margin-top: 20px; font-family: monospace; }
+                    .footer { text-align: center; margin-top: 40px; font-size: 12px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 15px; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <div class="header">
+                        <div>
+                            <h1 class="firm-name">${foundDoc.vendor || 'Shaney Enterprise'}</h1>
+                            <div class="doc-title">${title}</div>
+                        </div>
+                        <div class="meta">
+                            <div><strong>Date:</strong> ${foundDoc.date || ''}</div>
+                            <div><strong>Ref No:</strong> ${foundDoc.ref || ''}</div>
+                        </div>
+                    </div>
+                    <div class="details">
+                        <p><strong>Billed To / Certified M/s:</strong> ${foundDoc.party || ''}</p>
+                        ${foundDoc.validDate ? `<p><strong>Valid Upto:</strong> ${foundDoc.validDate}</p>` : ''}
+                    </div>
+                    ${itemsHTML}
+                    <div class="total">Grand Total: ₹${Number(foundDoc.total || 0).toFixed(2)}</div>
+                    <div class="footer">For ${foundDoc.vendor || 'Shaney Enterprise'} &bull; Verified Digital Document</div>
+                </div>
+            </body>
+            </html>
+        `);
+    } catch (err) {
+        console.error("GET /preview/:id error:", err);
+        res.status(500).send("Internal Server Error");
     }
 });
 

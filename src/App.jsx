@@ -135,8 +135,10 @@ export default function App() {
             const cloudJson = await res.json();
             if (cloudJson && cloudJson.data) {
               const data = cloudJson.data;
-              localStorage.setItem(`shaney_certificate_${previewDocId}`, JSON.stringify(data));
-              setPreviewDocData({ type: data.docType || 'certificate', data });
+              const docTypeKey = data.docType || 'certificate';
+              // 🟢 PERMANENT SECURITY CACHING: Save locally on first load so no further server reads occur
+              localStorage.setItem(`shaney_${docTypeKey}_${previewDocId}`, JSON.stringify(data));
+              setPreviewDocData({ type: docTypeKey, data });
               setPreviewLoading(false);
               return;
             }
@@ -671,7 +673,7 @@ export default function App() {
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen w-full bg-slate-950 flex flex-col lg:flex-row items-center justify-center relative overflow-y-auto px-4 py-8 lg:py-12 gap-8 lg:gap-12">
+      <div className="min-h-screen w-full bg-slate-950 flex flex-col lg:flex-row items-center justify-start lg:justify-center relative overflow-y-auto px-4 py-8 lg:py-12 gap-8 lg:gap-12">
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-slate-950 z-0"></div>
         <div className="absolute inset-0 bg-[radial-gradient(#00a67e_1px,transparent_1px)] [background-size:24px_24px] opacity-10 z-0"></div>
 
