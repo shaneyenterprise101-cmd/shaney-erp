@@ -149,75 +149,143 @@ function numberToWords(num) {
     return str;
 }
 
+// --- BULLETPROOF FIRM-WISE RATE LOOKUP HELPER ---
+const getProductRateForFirm = (prod, firmId, firmName, firmsList) => {
+    if (!prod || !prod.rates || typeof prod.rates !== 'object') return 0;
+    const cleanId = String(firmId || '').trim();
+    const cleanName = String(firmName || '').trim().toLowerCase();
+
+    // 1. Direct ID match
+    if (prod.rates[cleanId] !== undefined && prod.rates[cleanId] !== '' && prod.rates[cleanId] !== null) {
+        return parseFloat(prod.rates[cleanId]) || 0;
+    }
+    // 2. Direct Name match
+    if (firmName && prod.rates[firmName] !== undefined && prod.rates[firmName] !== '' && prod.rates[firmName] !== null) {
+        return parseFloat(prod.rates[firmName]) || 0;
+    }
+
+    // 3. Case-insensitive key scan inside rates object
+    const foundKey = Object.keys(prod.rates).find(k => {
+        const ck = String(k).trim().toLowerCase();
+        return ck === cleanId.toLowerCase() || ck === cleanName;
+    });
+    if (foundKey && prod.rates[foundKey] !== undefined && prod.rates[foundKey] !== null) {
+        return parseFloat(prod.rates[foundKey]) || 0;
+    }
+
+    // 4. Match via firms list
+    const matchedFirm = firmsList.find(f => f.id === cleanId || (f.name && f.name.trim().toLowerCase() === cleanName));
+    if (matchedFirm) {
+        if (prod.rates[matchedFirm.id] !== undefined && prod.rates[matchedFirm.id] !== null) return parseFloat(prod.rates[matchedFirm.id]) || 0;
+        if (prod.rates[matchedFirm.name] !== undefined && prod.rates[matchedFirm.name] !== null) return parseFloat(prod.rates[matchedFirm.name]) || 0;
+    }
+
+    // 5. Fallback to first available rate
+    const firstVal = Object.values(prod.rates)[0];
+    return firstVal !== undefined && firstVal !== null && firstVal !== '' ? parseFloat(firstVal) || 0 : 0;
+};
+
 // --- DYNAMIC HTML TEMPLATES ---
 const getQuoteHeaderHTML = (template, v, cColor, firmName, firmAddr, firmContact) => {
-    let titleText = v.quoteMainTitle || "QUOTATION";
-    let tB = v.titleB ? "font-weight: 900;" : "font-weight: bold;";
-    let tI = v.titleI ? "font-style: italic;" : "font-style: normal;";
-    let tU = v.titleU ? "text-decoration: underline;" : "text-decoration: none;";
-    let tC = v.titleColor || cColor;
-    let tF = v.titleFont || "Arial";
-    let tS = v.titleSize ? v.titleSize + "px" : "36px";
-    let tX = v.titleX || 0;
-    let tY = v.titleY || 0;
+    let titleText = v.quoteTitle || "QUOTATION";
+    let tB = v.quoteTitleBold ? "font-weight: 900;" : "font-weight: normal;";
+    let tI = v.quoteTitleItalic ? "font-style: italic;" : "font-style: normal;";
+    let tU = v.quoteTitleUnderline ? "text-decoration: underline;" : "text-decoration: none;";
+    let tC = v.quoteTitleColor || cColor;
+    let tF = v.quoteTitleFont || "Arial";
+    let tS = v.quoteTitleSize ? v.quoteTitleSize + "px" : "32px";
+    let tX = v.quoteTitleX || 0;
+    let tY = v.quoteTitleY || 0;
 
-    let mainTitle = `<h1 class="uppercase tracking-[0.25em]" style="text-align: center; margin-bottom: 20px; position: relative; z-index: 10; font-family: '${tF}', sans-serif; font-size: ${tS}; ${tB} ${tI} ${tU} color: ${tC}; transform: translate(${tX}px, ${tY}px);">${titleText}</h1>`;
+    let mainTitle = `<h1 class="uppercase tracking-widest" style="margin-bottom: 15px; position: relative; z-index: 10; font-family: '${tF}', sans-serif; font-size: ${tS}; ${tB} ${tI} ${tU} color: ${tC}; transform: translate(${tX}px, ${tY}px); line-height: 1;">${titleText}</h1>`;
 
-    let hB = v.headerB ? "font-weight: 900;" : "font-weight: normal;";
-    let hI = v.headerI ? "font-style: italic;" : "font-style: normal;";
-    let hF = v.headerFont || "Arial";
-    let hS = v.headerSize ? v.headerSize + "px" : "30px";
-    let nameStyle = `font-family: '${hF}', sans-serif; font-size: ${hS}; ${hB} ${hI} line-height: 1;`;
-    let name = `<span style="${nameStyle}">${firmName}</span>`;
+    let hB = v.headerFontBold ? "font-weight: 900;" : "font-weight: normal;";
+    let hI = v.headerFontItalic ? "font-style: italic;" : "font-style: normal;";
+    let hU = v.headerFontUnderline ? "text-decoration: underline;" : "";
+    let hF = v.headerFontFam || "Arial";
+    let hS = v.headerFontSize ? v.headerFontSize : 34;
+    let hC = v.headerFontColor || cColor;
+    
+    let subSizeVal = Math.max(10, Math.floor(hS * 0.4));
+    let nameStyle = `font-family: '${hF}', sans-serif; font-size: ${hS}px; ${hB} ${hI} ${hU} line-height: 1.1; display: inline-block;`;
+    let subStyle = `font-size: ${subSizeVal}px; opacity: 0.85; margin-top: 6px; display: block; font-family: '${hF}', sans-serif;`;
+
+    let nameStr = `<span style="${nameStyle}">${firmName}</span>`;
+    let addrStr = `<div style="${subStyle}">${firmAddr || ""}</div>`;
 
     let html = "";
     switch (template) {
-        case 'h-solid-block': html = `<div class="flex flex-col items-center text-center w-full p-6 rounded-2xl mb-2" style="background: ${cColor}; color: white;"><h2 class="uppercase">${name}</h2><p class="text-xs mt-2 opacity-90">${firmAddr}</p><p class="text-[11px] font-bold mt-1 uppercase opacity-80">${firmContact}</p></div>`; break;
-        case 'h-dark-mode': html = `<div class="flex flex-col items-end text-right w-full p-6 bg-slate-900 rounded-xl mb-2 border-b-4" style="border-color: ${cColor}; color: white;"><h2>${name}</h2><p class="text-xs mt-2 text-slate-400">${firmAddr}</p><p class="text-[11px] font-bold mt-1 tracking-widest" style="color: ${cColor};">${firmContact}</p></div>`; break;
-        case 'h-ultimate-pro': html = `<div class="flex justify-between items-center w-full pb-6 border-b border-slate-200"><h2 style="color: ${cColor}; border-left: 6px solid ${cColor}; padding-left: 15px;">${name}</h2><div class="text-right border-r-4 pr-4" style="border-color: ${cColor};"><p class="text-[10px] text-slate-500 uppercase">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-slate-800">${firmContact}</p></div></div>`; break;
-        case 'h-modern-right': html = `<div class="flex flex-col items-end w-full pb-4 border-b border-slate-300"><h2 class="text-right" style="color: ${cColor};">${name}</h2><p class="text-xs text-slate-600 mt-2 text-right">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-right" style="color: ${cColor};">${firmContact}</p></div>`; break;
-        case 'h-elegant-line': html = `<div class="flex flex-col items-start w-full pb-3 mb-2 relative"><h2 class="text-slate-900">${name}</h2><div style="width: 80px; height: 5px; background: ${cColor}; margin-top: 8px; border-radius: 3px;"></div><p class="text-xs text-slate-600 mt-3">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-slate-500">${firmContact}</p></div>`; break;
-        case 'h-center-focus': html = `<div class="flex flex-col items-center w-full pb-4 border-b border-slate-200"><h2 class="text-center" style="color: ${cColor};">${name}</h2><p class="text-xs text-slate-600 mt-2 text-center">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-slate-500 text-center bg-slate-100 px-4 py-1.5 rounded-full mt-2">${firmContact}</p></div>`; break;
-        case 'h-minimal-box': html = `<div class="flex flex-col items-center text-center w-full p-5 border-2 rounded-xl mb-2" style="border-color: ${cColor};"><h2 style="color: ${cColor};">${name}</h2><p class="text-xs text-slate-600 mt-2">${firmAddr}</p><p class="text-[11px] font-bold mt-1" style="color: ${cColor};">${firmContact}</p></div>`; break;
-        case 'h-bold-brand': html = `<div class="flex flex-col items-start w-full pb-4 border-l-8 pl-4 mb-2" style="border-color: ${cColor};"><h2 class="tracking-tighter" style="color: ${cColor};">${name}</h2><p class="text-xs text-slate-500 mt-2 font-medium">${firmAddr} • ${firmContact}</p></div>`; break;
-        case 'h-gradient-fade': html = `<div class="flex flex-col items-start w-full p-6 rounded-lg mb-2" style="background: linear-gradient(90deg, ${cColor}20, transparent);"><h2 style="color: ${cColor};">${name}</h2><p class="text-xs text-slate-700 mt-2">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-slate-900">${firmContact}</p></div>`; break;
-        case 'h-corporate-split': html = `<div class="flex justify-between items-end w-full pb-4 border-b-2" style="border-color: ${cColor};"><h2 class="text-slate-800">${name}</h2><div class="text-right"><p class="text-[10px] text-slate-500">${firmAddr}</p><p class="text-[11px] font-bold mt-1" style="color: ${cColor};">${firmContact}</p></div></div>`; break;
-        case 'h-luxury-accent': html = `<div class="flex flex-col items-center w-full pb-4 mb-2"><h2 class="tracking-widest text-slate-900 uppercase">${name}</h2><div style="width: 100%; height: 1px; background: ${cColor}; margin: 15px 0;"></div><p class="text-xs text-slate-500 text-center">${firmAddr} | <b style="color:${cColor};">${firmContact}</b></p></div>`; break;
-        case 'h-tech-neon': html = `<div class="flex flex-col items-start w-full p-5 bg-slate-900 rounded-lg mb-2"><h2 style="color: ${cColor}; text-shadow: 0 0 10px ${cColor}80;">${name}</h2><p class="text-xs text-slate-400 mt-2">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-white">${firmContact}</p></div>`; break;
-        case 'h-clean-cut': html = `<div class="flex flex-col items-start w-full pb-4 mb-2"><h2 class="text-slate-800 flex items-center gap-3"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${cColor};"></span>${name}</h2><p class="text-xs text-slate-500 mt-2 pl-6">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-slate-400 pl-6">${firmContact}</p></div>`; break;
-        case 'h-vintage-stamp': html = `<div class="flex flex-col items-center text-center w-full p-6 border-4 border-double rounded mb-2" style="border-color: ${cColor};"><h2 class="uppercase tracking-widest" style="color: ${cColor};">${name}</h2><p class="text-xs text-slate-700 mt-3 font-serif italic">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-slate-900">${firmContact}</p></div>`; break;
-        default: html = `<div class="flex flex-col items-start w-full pb-4 border-b-2 border-slate-200"><h2 style="color: ${cColor};">${name}</h2><p class="text-xs text-slate-600 mt-2">${firmAddr}</p><p class="text-[11px] font-bold mt-1 text-slate-500">${firmContact}</p></div>`;
+        case 'h-solid-block': html = `<div class="flex justify-center items-center w-full p-6 rounded-2xl mb-2 text-center" style="background: ${cColor}; color: white;"><div><div class="uppercase">${nameStr}</div>${addrStr}</div></div>`; break;
+        case 'h-dark-mode': html = `<div class="flex justify-start items-center w-full p-6 bg-slate-900 rounded-xl mb-2 border-b-4" style="border-color: ${cColor}; color: white;"><div><div>${nameStr}</div>${addrStr}</div></div>`; break;
+        case 'h-ultimate-pro': html = `<div class="flex justify-start items-center w-full pb-6 mb-2 border-b border-slate-200" style="color: ${hC};"><div><div style="border-left: 6px solid ${cColor}; padding-left: 15px;">${nameStr}</div><div style="padding-left: 15px;">${addrStr}</div></div></div>`; break;
+        case 'h-modern-right': html = `<div class="flex flex-col items-end w-full pb-4 mb-2 border-b border-slate-300" style="color: ${hC};"><div class="text-right">${nameStr}</div><div class="text-right">${addrStr}</div></div>`; break;
+        case 'h-elegant-line': html = `<div class="flex justify-start items-end w-full pb-3 mb-2 relative" style="color: ${hC};"><div><div>${nameStr}</div><div style="width: 80px; height: 5px; background: ${cColor}; margin-top: 8px; border-radius: 3px;"></div><div class="mt-3">${addrStr}</div></div></div>`; break;
+        case 'h-center-focus': html = `<div class="flex flex-col items-center w-full pb-4 mb-2 border-b border-slate-200" style="color: ${hC};"><div class="text-center">${nameStr}</div><div class="text-center">${addrStr}</div></div>`; break;
+        case 'h-minimal-box': html = `<div class="flex justify-center items-center w-full p-5 border-2 rounded-xl mb-2 text-center" style="border-color: ${cColor}; color: ${hC};"><div><div>${nameStr}</div>${addrStr}</div></div>`; break;
+        case 'h-bold-brand': html = `<div class="flex justify-start items-end w-full pb-4 mb-2 border-l-8 pl-4" style="border-color: ${cColor}; color: ${hC};"><div><div class="tracking-tighter">${nameStr}</div>${addrStr}</div></div>`; break;
+        case 'h-gradient-fade': html = `<div class="flex justify-start items-center w-full p-6 rounded-lg mb-2" style="background: linear-gradient(90deg, ${cColor}20, transparent); color: ${hC};"><div><div>${nameStr}</div>${addrStr}</div></div>`; break;
+        case 'h-corporate-split': html = `<div class="flex justify-start items-end w-full pb-4 mb-2 border-b-2" style="border-color: ${cColor}; color: ${hC};"><div><div>${nameStr}</div>${addrStr}</div></div>`; break;
+        case 'h-luxury-accent': html = `<div class="flex flex-col items-center w-full pb-4 mb-2" style="color: ${hC};"><div class="tracking-widest uppercase">${nameStr}</div><div style="width: 100%; height: 1px; background: ${cColor}; margin: 15px 0;"></div><div class="text-center">${addrStr}</div></div>`; break;
+        case 'h-tech-neon': html = `<div class="flex justify-start items-center w-full p-5 bg-slate-900 rounded-lg mb-2 text-white"><div><div style="text-shadow: 0 0 10px ${cColor}80;">${nameStr}</div>${addrStr}</div></div>`; break;
+        case 'h-clean-cut': html = `<div class="flex justify-start items-end w-full pb-4 mb-2" style="color: ${hC};"><div><div class="flex items-center gap-3"><span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:${cColor};"></span>${nameStr}</div><div class="pl-6">${addrStr}</div></div></div>`; break;
+        case 'h-vintage-stamp': html = `<div class="flex flex-col items-center text-center w-full p-6 border-4 border-double rounded mb-2" style="border-color: ${cColor}; color: ${hC};"><div class="uppercase tracking-widest">${nameStr}</div><div class="font-serif italic mt-2">${addrStr}</div></div>`; break;
+        default: html = `<div class="flex justify-start items-center w-full pb-4 mb-2 border-b-2 border-slate-200" style="color: ${hC};"><div><div>${nameStr}</div>${addrStr}</div></div>`;
     }
     return mainTitle + html;
 };
 
 const getQuoteBillingHTML = (template, prefix, dateStr, cName, cAddr, cContact, cColor, v) => {
-    let bB = v.billingB ? "font-weight: 900;" : "font-weight: normal;";
-    let bI = v.billingI ? "font-style: italic;" : "font-style: normal;";
-    let bF = v.billingFont || "Arial";
-    let bS = v.billingSize ? v.billingSize + "px" : "16px";
-    let bNameStyle = `font-family: '${bF}', sans-serif; font-size: ${bS}; ${bB} ${bI}; line-height: 1.1; display: inline-block; color: #0f172a;`;
+    let bB = v.billingFontBold ? "font-weight: 900;" : "font-weight: normal;";
+    let bI = v.billingFontItalic ? "font-style: italic;" : "font-style: normal;";
+    let bU = v.billingFontUnderline ? "text-decoration: underline;" : "";
+    let bF = v.billingFontFam || "Arial";
+    let bS = v.billingFontSize ? v.billingFontSize : 13;
+    let bC = v.billingFontColor || '#0f172a';
+    
+    let bSubSize = Math.max(9, Math.floor(bS * 0.85)); 
+    let bSmallSize = Math.max(8, Math.floor(bS * 0.70)); 
+
+    let bNameStyle = `font-family: '${bF}', sans-serif; font-size: ${bS}px; ${bB} ${bI} ${bU}; line-height: 1.2; display: block; margin-top: 2px;`;
     cName = `<span style="${bNameStyle}">${cName || 'UNKNOWN CLIENT'}</span>`;
 
-    const left = `<span class="text-[9px] font-black uppercase block mb-1" style="color: ${cColor};">Billed To</span>${cName}<p class="text-xs text-slate-600 mt-1 break-words">${cAddr || ''}</p><div class="break-words mt-1 text-[10px] font-bold">${cContact || ''}</div>`;
-    const right = `<table class="border-collapse text-left whitespace-nowrap ml-auto"><tr><td class="font-bold pr-3 text-slate-400 uppercase text-[9px] pb-1.5 text-right">Quote Ref</td><td class="font-black font-mono text-sm pb-1.5 text-right" style="color:${cColor};">:<span class="cursor-pointer">${prefix}</span></td></tr><tr><td class="font-bold pr-3 text-slate-400 uppercase text-[9px] pt-1.5 border-t border-slate-100 text-right">Date</td><td class="font-bold text-slate-800 pt-1.5 border-t border-slate-100 text-right">:${dateStr}</td></tr></table>`;
+    const left = `
+      <span style="font-size: ${bSmallSize}px; opacity: 0.7; text-transform: uppercase; font-weight: 900; display: block; letter-spacing: 0.05em;">Billed To</span>
+      ${cName}
+      <div style="font-size: ${bSubSize}px; opacity: 0.85; margin-top: 4px; word-break: break-word;">${cAddr || ''}</div>
+      <div style="font-size: ${bSubSize}px; font-weight: bold; margin-top: 4px; word-break: break-word;">📞 Contact: ${cContact || ''}</div>
+    `;
+
+    const right = `
+      <table style="border-collapse: collapse; text-align: left; white-space: nowrap; margin-left: auto;">
+        <tr>
+          <td style="font-weight: bold; padding-right: 12px; text-transform: uppercase; font-size: ${bSmallSize}px; padding-bottom: 6px; text-align: right; opacity: 0.7;">Quote Ref</td>
+          <td style="font-weight: 900; font-family: monospace; font-size: ${bS}px; padding-bottom: 6px; text-align: right;">: ${prefix}</td>
+        </tr>
+        <tr>
+          <td style="font-weight: bold; padding-right: 12px; text-transform: uppercase; font-size: ${bSmallSize}px; padding-top: 6px; border-top: 1px solid currentColor; text-align: right; opacity: 0.7;">Date</td>
+          <td style="font-weight: bold; font-size: ${bS}px; padding-top: 6px; border-top: 1px solid currentColor; text-align: right;">: ${dateStr}</td>
+        </tr>
+      </table>
+    `;
+
+    const mainWrapStyle = `color: ${bC}; font-family: '${bF}', sans-serif;`;
 
     switch (template) {
-        case 'b-solid-right': return `<div class="flex rounded-xl overflow-hidden w-full mb-4 border border-slate-200"><div class="w-[55%] bg-white p-5 pr-4">${left}</div><div class="w-[45%] p-5 text-white" style="background:${cColor};"><table class="border-collapse text-left whitespace-nowrap ml-auto"><tr><td class="font-bold pr-3 text-white/70 uppercase text-[9px] pb-1.5 text-right">Quote Ref</td><td class="font-black font-mono text-sm pb-1.5 text-right">:<span>${prefix}</span></td></tr><tr><td class="font-bold pr-3 text-white/70 uppercase text-[9px] pt-1.5 border-t border-white/20 text-right">Date</td><td class="font-bold pt-1.5 border-t border-white/20 text-right">:${dateStr}</td></tr></table></div></div>`;
-        case 'b-grid-compact': return `<div class="grid grid-cols-4 gap-4 bg-slate-50 p-4 rounded-lg w-full mb-4 border" style="border-color: ${cColor}40;"><div class="col-span-2 pr-4"><span class="text-[9px] font-black uppercase block mb-1" style="color: ${cColor};">Billed To</span>${cName}</div><div class="col-span-2 text-right"><span class="text-[9px] font-black text-slate-400 uppercase block mb-1">Quote Ref</span><h4 class="font-black font-mono text-sm" style="color:${cColor};">:<span >${prefix}</span></h4></div><div class="col-span-2 pr-4"><p class="text-[10px] text-slate-600 break-words">${cAddr}</p><div class="text-[10px] font-bold mt-1 break-words">${cContact}</div></div><div class="col-span-2 text-right"><span class="text-[9px] font-black text-slate-400 uppercase block mb-1">Date</span><h4 class="font-bold text-slate-800 text-xs">${dateStr}</h4></div></div>`;
-        case 'b-ultra-premium': return `<div class="flex justify-between items-start p-6 w-full mb-4 bg-white border border-slate-200 relative overflow-hidden rounded-lg shadow-sm"><div class="absolute top-0 left-0 w-full h-1" style="background: linear-gradient(90deg, ${cColor}, transparent);"></div><div class="w-[55%] relative z-10 pr-4">${left}</div><div class="w-[40%] text-right flex justify-end relative z-10">${right}</div></div>`;
-        case 'b-minimal-border': return `<div class="flex justify-between items-start w-full mb-4 border-2 p-5 rounded-lg" style="border-color: ${cColor};"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right">${right}</div></div>`;
-        case 'b-floating-shadow': return `<div class="flex justify-between items-start w-full mb-4"><div class="w-[48%] bg-white shadow-lg p-5 rounded-xl border-t-4" style="border-top-color: ${cColor};">${left}</div><div class="w-[48%] bg-white shadow-lg p-5 rounded-xl flex justify-end border-t-4" style="border-top-color: ${cColor};">${right}</div></div>`;
-        case 'b-dual-cards': return `<div class="flex justify-between items-start w-full mb-4"><div class="w-[48%] bg-slate-50 border border-slate-200 p-5 rounded-xl pr-4">${left}</div><div class="w-[48%] bg-slate-50 border border-slate-200 p-5 rounded-xl flex justify-end">${right}</div></div>`;
-        case 'b-accent-left': return `<div class="flex justify-between items-start w-full mb-4 bg-white border border-slate-200 p-5 rounded-lg border-l-8" style="border-left-color: ${cColor};"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
-        case 'b-boxed-tint': return `<div class="flex justify-between items-start w-full mb-4 p-5 rounded-lg" style="background-color: ${cColor}10; border: 1px solid ${cColor}40;"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right bg-white p-3 rounded shadow-sm">${right}</div></div>`;
-        case 'b-clean-line': return `<div class="flex justify-between items-start w-full mb-4 pb-4 border-b border-slate-300"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
-        case 'b-corporate-grey': return `<div class="flex justify-between items-start w-full mb-4 bg-slate-100 p-5 rounded-xl"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
-        case 'b-modern-dark': return `<div class="flex justify-between items-start w-full mb-4 bg-slate-800 text-white p-5 rounded-xl"><div class="w-[55%] pr-4"><span class="text-[9px] font-black uppercase block mb-1" style="color: ${cColor};">Billed To</span>${cName}<p class="text-xs text-slate-300 mt-1">${cAddr}</p><div class="text-[10px] font-bold mt-1">${cContact}</div></div><div class="w-[40%] text-right flex justify-end"><table class="border-collapse text-left whitespace-nowrap ml-auto text-white"><tr><td class="font-bold pr-3 text-slate-400 uppercase text-[9px] pb-1.5 text-right">Quote Ref</td><td class="font-black font-mono text-sm pb-1.5 text-right" style="color:${cColor};">:<span >${prefix}</span></td></tr><tr><td class="font-bold pr-3 text-slate-400 uppercase text-[9px] pt-1.5 border-t border-slate-600 text-right">Date</td><td class="font-bold pt-1.5 border-t border-slate-600 text-right">:${dateStr}</td></tr></table></div></div>`;
-        case 'b-tech-grid': return `<div class="flex justify-between items-start w-full mb-4 border border-dashed p-5" style="border-color: ${cColor};"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
-        case 'b-elegant-serif': return `<div class="flex justify-between items-start w-full mb-4 px-4"><div class="w-[55%] pr-4 font-serif">${left}</div><div class="w-[40%] text-right flex justify-end font-serif">${right}</div></div>`;
-        case 'b-impact-block': return `<div class="flex justify-between items-stretch w-full mb-4"><div class="w-[60%] p-5 text-white rounded-l-lg" style="background: ${cColor};"><span class="text-[9px] font-black uppercase block mb-1 opacity-70">Billed To</span>${cName}<p class="text-xs text-white/80 mt-1">${cAddr}</p><div class="text-[10px] font-bold mt-1">${cContact}</div></div><div class="w-[40%] bg-slate-100 p-5 rounded-r-lg flex justify-end">${right}</div></div>`;
-        default: return `<div class="flex justify-between items-start bg-slate-50 p-5 rounded-xl border-l-4 w-full mb-4" style="border-left-color: ${cColor};"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right bg-white p-3 rounded-lg border border-slate-100">${right}</div></div>`;
+        case 'b-solid-right': return `<div class="flex rounded-xl overflow-hidden w-full mb-4 border border-slate-200" style="${mainWrapStyle}"><div class="w-[55%] bg-white p-5 pr-4">${left}</div><div class="w-[45%] p-5 text-white" style="background:${cColor}; color: white;">${right}</div></div>`;
+        case 'b-grid-compact': return `<div class="grid grid-cols-4 gap-4 bg-slate-50 p-4 rounded-lg w-full mb-4 border" style="border-color: ${cColor}40; ${mainWrapStyle}"><div class="col-span-2 pr-4">${left}</div><div class="col-span-2 text-right" style="color: ${cColor};">${right}</div></div>`;
+        case 'b-ultra-premium': return `<div class="flex justify-between items-center p-6 w-full mb-4 bg-white border border-slate-200 relative overflow-hidden rounded-lg shadow-sm" style="${mainWrapStyle}"><div class="absolute top-0 left-0 w-full h-1" style="background: linear-gradient(90deg, ${cColor}, transparent);"></div><div class="w-[55%] relative z-10 pr-4">${left}</div><div class="w-[40%] text-right flex justify-end relative z-10">${right}</div></div>`;
+        case 'b-minimal-border': return `<div class="flex justify-between items-center w-full mb-4 border-2 p-5 rounded-lg" style="border-color: ${cColor}; ${mainWrapStyle}"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
+        case 'b-floating-shadow': return `<div class="flex justify-between items-center w-full mb-4 gap-4" style="${mainWrapStyle}"><div class="w-[50%] bg-white shadow-lg p-5 rounded-xl border-t-4" style="border-top-color: ${cColor};">${left}</div><div class="w-[50%] bg-white shadow-lg p-5 rounded-xl flex justify-end border-t-4" style="border-top-color: ${cColor};">${right}</div></div>`;
+        case 'b-dual-cards': return `<div class="flex justify-between items-center w-full mb-4 gap-4" style="${mainWrapStyle}"><div class="w-[50%] bg-slate-50 border border-slate-200 p-5 rounded-xl pr-4">${left}</div><div class="w-[50%] bg-slate-50 border border-slate-200 p-5 rounded-xl flex justify-end">${right}</div></div>`;
+        case 'b-accent-left': return `<div class="flex justify-between items-center w-full mb-4 bg-white border border-slate-200 p-5 rounded-lg border-l-8" style="border-left-color: ${cColor}; ${mainWrapStyle}"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
+        case 'b-boxed-tint': return `<div class="flex justify-between items-center w-full mb-4 p-5 rounded-lg" style="background-color: ${cColor}10; border: 1px solid ${cColor}40; ${mainWrapStyle}"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right bg-white p-3 rounded shadow-sm flex justify-end">${right}</div></div>`;
+        case 'b-clean-line': return `<div class="flex justify-between items-center w-full mb-4 pb-4 border-b border-slate-300" style="${mainWrapStyle}"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
+        case 'b-corporate-grey': return `<div class="flex justify-between items-center w-full mb-4 bg-slate-100 p-5 rounded-xl" style="${mainWrapStyle}"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
+        case 'b-modern-dark': return `<div class="flex justify-between items-center w-full mb-4 bg-slate-800 text-white p-5 rounded-xl" style="font-family: '${bF}', sans-serif;"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
+        case 'b-tech-grid': return `<div class="flex justify-between items-center w-full mb-4 border border-dashed p-5" style="border-color: ${cColor}; ${mainWrapStyle}"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
+        case 'b-elegant-serif': return `<div class="flex justify-between items-center w-full mb-4 px-4" style="font-family: Georgia, serif; color: ${bC};"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right flex justify-end">${right}</div></div>`;
+        case 'b-impact-block': return `<div class="flex justify-between items-stretch w-full mb-4" style="${mainWrapStyle}"><div class="w-[60%] p-5 text-white rounded-l-lg" style="background: ${cColor};">${left}</div><div class="w-[40%] bg-slate-100 p-5 rounded-r-lg flex justify-end">${right}</div></div>`;
+        default: return `<div class="flex justify-between items-center bg-slate-50 p-5 rounded-xl border-l-4 w-full mb-4" style="border-left-color: ${cColor}; ${mainWrapStyle}"><div class="w-[55%] pr-4">${left}</div><div class="w-[40%] text-right bg-white p-3 rounded-lg border border-slate-100 flex justify-end">${right}</div></div>`;
     }
 };
 
@@ -237,12 +305,20 @@ export default function Quotation({ selectedFY, initialViewMode }) {
   // 🟢 REAL-TIME LIVE SYNC LISTENER (Fixed with 'all' trigger support)
   useEffect(() => {
     const handleDataUpdate = (e) => {
-      if (!e.detail || e.detail.type === 'quotations' || e.detail.type === 'all') {
+      if (!e.detail || e.detail.type === 'quotations' || e.detail.type === 'all' || e.detail.type === 'templates' || e.detail.type === 'products') {
         const saved = localStorage.getItem('ERP_History_v104');
         if (saved) {
           let parsedData = JSON.parse(saved);
           parsedData = parsedData.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
           setQuotations(parsedData.filter(b => b.docType === 'quotation'));
+        }
+        const savedTemplates = localStorage.getItem('ERP_FirmTemplates_v104');
+        if (savedTemplates) {
+          setFirmTemplates(JSON.parse(savedTemplates));
+        }
+        const savedProducts = localStorage.getItem('ERP_Products_v104');
+        if (savedProducts) {
+          setProducts(JSON.parse(savedProducts));
         }
       }
     };
@@ -291,25 +367,29 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     return parsedData.filter(b => b.docType === 'quotation');
   });
 
-  // 🟢 Fetch quotations from Cloud on load
+  // 🟢 Fetch quotations and products from Cloud on load
   useEffect(() => {
-    const fetchCloudQuotations = async () => {
+    const fetchCloudData = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/data`);
         if (res.ok) {
           const allData = await res.json();
           if (allData && typeof allData === 'object') {
             let cloudQuotes = [];
+            let cloudProds = [];
+
             if (Array.isArray(allData)) {
               cloudQuotes = allData.filter(item => item.docType === 'quotation');
-            } else if (allData.history && Array.isArray(allData.history)) {
-              cloudQuotes = allData.history.filter(item => item.docType === 'quotation');
-            } else if (allData.payload) {
-              try {
-                const parsed = JSON.parse(allData.payload);
-                if (parsed.history) cloudQuotes = parsed.history.filter(item => item.docType === 'quotation');
-              } catch(e){}
+              cloudProds = allData.filter(item => item.docType === 'product');
+            } else {
+              if (allData.history && Array.isArray(allData.history)) {
+                cloudQuotes = allData.history.filter(item => item.docType === 'quotation');
+              }
+              if (allData.products && Array.isArray(allData.products)) {
+                cloudProds = allData.products;
+              }
             }
+
             if (cloudQuotes.length > 0) {
               const checkedCloudQuotes = cloudQuotes.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
               setQuotations(checkedCloudQuotes);
@@ -318,13 +398,18 @@ export default function Quotation({ selectedFY, initialViewMode }) {
               const merged = [...nonQuotes, ...checkedCloudQuotes];
               localStorage.setItem('ERP_History_v104', JSON.stringify(merged));
             }
+
+            if (cloudProds.length > 0) {
+              setProducts(cloudProds);
+              localStorage.setItem('ERP_Products_v104', JSON.stringify(cloudProds));
+            }
           }
         }
       } catch (err) {
-        console.error("Error fetching quotations from cloud:", err);
+        console.error("Error fetching data from cloud:", err);
       }
     };
-    fetchCloudQuotations();
+    fetchCloudData();
   }, []);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -358,6 +443,31 @@ export default function Quotation({ selectedFY, initialViewMode }) {
   const [items, setItems] = useState([{ id: Date.now(), desc: '', hsn: '8424', qty: 1, rate: 0, gst: 18, amount: 0 }]);
 
   const activeFirmObj = firms.find(f => f.id === formData.activeFirmId) || { name: 'FIRM NAME', address: 'Address', contact: '', gstRate: 18, dayOffset: 0 };
+
+  // 🟢 ROBUST DESIGN RESOLUTION (Matches activeFirmId + '_quotation' templateKey)
+  const templateKey = `${formData.activeFirmId}_quotation`;
+  const currentDesign = firmTemplates[templateKey] || firmTemplates[formData.activeFirmId] || {
+    themeColor: '#1e40af',
+    quoteThemeColor: '#1e40af',
+    quoteTitle: 'QUOTATION',
+    quoteTitleFont: 'Arial',
+    quoteTitleSize: 32,
+    quoteTitleColor: '#1e40af',
+    quoteTitleBold: true,
+    quoteTitleItalic: false,
+    quoteTitleUnderline: false,
+    quoteTitleX: 0,
+    quoteTitleY: 0,
+    headerTemp: 'h-classic-left',
+    headerFontFam: 'Arial', headerFontSize: 34, headerFontColor: '#dc2626', headerFontBold: true, headerFontItalic: false, headerFontUnderline: false,
+    billingTemp: 'b-classic-split',
+    billingFontFam: 'Arial', billingFontSize: 12, billingFontColor: '#0f172a', billingFontBold: false, billingFontItalic: false, billingFontUnderline: false,
+    tableTemp: 'table-base',
+    tableFontFam: 'Arial', tableFontSize: 12, tableFontColor: '#0f172a', tableFontBold: false, tableFontItalic: false, tableFontUnderline: false,
+    quoteTermText: '* Terms & Conditions: Validity 30 days. E.& O.E.',
+    quoteTermFontFam: 'Arial', quoteTermFontSize: 10, quoteTermFontColor: '#64748b', quoteTermFontBold: false, quoteTermFontItalic: true, quoteTermFontUnderline: false, quoteTermX: 0, quoteTermY: 0,
+    graphics: { logo: { url: '', x: 0, y: 0, size: 100 }, stamp: { url: '', x: 0, y: 0, size: 100 } }
+  };
 
   useEffect(() => {
     if (!editingQuoteId && viewMode === 'create') {
@@ -403,9 +513,9 @@ export default function Quotation({ selectedFY, initialViewMode }) {
         const updatedItems = items.map(it => {
             let r = it.rate;
             if (it.desc) {
-                const prod = products.find(p => p.description.toLowerCase() === it.desc.toLowerCase());
-                if (prod && prod.rates && prod.rates[activeId] !== undefined) {
-                    r = parseFloat(prod.rates[activeId]) || 0;
+                const prod = products.find(p => String(p.description || '').trim().toLowerCase() === String(it.desc).trim().toLowerCase());
+                if (prod) {
+                    r = getProductRateForFirm(prod, activeId, f.name, firms);
                 }
             }
             const q = parseFloat(it.qty) || 0;
@@ -428,28 +538,32 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     }
   }, [formData.activeFirmId, editingQuoteId, viewMode, firms, products]);
 
+  // 🟢 FIRM CHANGE AUTO-RATE RECALCULATION EFFECT
   useEffect(() => {
-    if (viewMode === 'create' && products.length > 0) {
+    if (viewMode === 'create' && items.length > 0) {
+      const activeId = formData.activeFirmId;
+      const activeName = activeFirmObj.name ? activeFirmObj.name.trim().toLowerCase() : '';
       const firmGst = activeFirmObj.gstRate !== undefined ? Number(activeFirmObj.gstRate) : 18;
+
       const updatedItems = items.map(it => {
-        let r = it.rate;
+        let r = 0;
         if (it.desc) {
-          const prod = products.find(p => p.description.toLowerCase() === it.desc.toLowerCase());
-          if (prod && prod.rates && prod.rates[formData.activeFirmId] !== undefined) {
-            r = parseFloat(prod.rates[formData.activeFirmId]) || 0;
+          const prod = products.find(p => String(p.description || '').trim().toLowerCase() === String(it.desc).trim().toLowerCase());
+          if (prod) {
+            r = getProductRateForFirm(prod, activeId, activeFirmObj.name, firms);
           }
         }
         const q = parseFloat(it.qty) || 0;
-        return { 
-          ...it, 
-          rate: r, 
-          gst: firmGst, 
-          amount: q * r 
+        return {
+          ...it,
+          rate: r,
+          gst: firmGst,
+          amount: q * r
         };
       });
       setItems(updatedItems);
     }
-  }, [formData.activeFirmId, products]);
+  }, [formData.activeFirmId]);
 
   const getCustomerAddress = (partyName) => {
     const found = customers.find(c => c.name.toLowerCase() === partyName.toLowerCase());
@@ -504,14 +618,12 @@ export default function Quotation({ selectedFY, initialViewMode }) {
       newItems[index][field] = value;
       
       if (field === 'desc') {
-          const prod = products.find(p => p.description.toLowerCase() === value.toLowerCase());
+          const cleanVal = String(value || '').trim().toLowerCase();
+          const prod = products.find(p => String(p.description || '').trim().toLowerCase() === cleanVal);
+          
           if (prod) {
               newItems[index].hsn = prod.hsn || newItems[index].hsn;
-              if (prod.rates && prod.rates[formData.activeFirmId] !== undefined) {
-                  newItems[index].rate = parseFloat(prod.rates[formData.activeFirmId]) || 0;
-              } else {
-                  newItems[index].rate = 0;
-              }
+              newItems[index].rate = getProductRateForFirm(prod, formData.activeFirmId, activeFirmObj.name, firms);
           }
       }
 
@@ -521,12 +633,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
           newItems[index].amount = q * r;
       }
       setItems(newItems);
-  };
-
-  const currentDesign = firmTemplates[formData.activeFirmId] || {
-    themeColor: '#1e40af', quoteMainTitle: 'QUOTATION',
-    quoteHeaderTemp: 'h-solid-block', quoteBillingTemp: 'b-classic-split', quoteTableTemp: 'table-base table-modern',
-    quoteTableColor: '#1e40af', quoteHeaderColor: '#1e40af', quoteBillingColor: '#1e40af'
   };
 
   const handleSaveQuotation = async (e, directAction = 'save') => {
@@ -836,7 +942,6 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     const matchesFY = filterFY === 'ALL' || rowFY === filterFY || rowFY.includes(filterFY);
     return matchesSearch && matchesFirm && matchesFY;
   }).sort((a, b) => {
-    // 🟢 Robust Numerical Extractor for Quotation References
     if (sortConfig.key === 'ref') {
       const getNum = (str) => {
         const match = String(str || '').match(/(\d+)(?!.*\d)/);
@@ -907,9 +1012,9 @@ export default function Quotation({ selectedFY, initialViewMode }) {
       const { firmObj, design, party, address, contact, date, ref, itemsData } = payload;
       const g = graphics[firmObj.id] || {};
 
-      const tableClass = design.quoteTableTemp || "table-base table-modern";
-      const thSize = design.tableSize || 10;
-      const tCol = design.quoteTableColor || design.themeColor;
+      const tableClass = design.tableTemp || "table-base table-modern";
+      const thSize = design.tableFontSize || 10;
+      const tCol = design.quoteThemeColor || design.themeColor;
 
       return (
           <div id={containerId} className="bg-white shadow-2xl relative w-[794px] h-auto min-h-[1123px] overflow-hidden flex flex-col box-border z-0 p-8 md:p-12">
@@ -922,10 +1027,32 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                 .table-striped tbody tr:nth-child(even) { background-color: #f8fafc; }
             `}} />
             
-            <div className="absolute top-0 left-0 right-0 h-2" style={{ background: design.themeColor }}></div>
+            <div className="absolute top-0 left-0 right-0 h-2" style={{ background: design.quoteThemeColor || design.themeColor }}></div>
             
-            <div className="w-full transition-all duration-300" dangerouslySetInnerHTML={{__html: getQuoteHeaderHTML(design.quoteHeaderTemp || 'h-solid-block', design, design.quoteHeaderColor || design.themeColor, firmObj.name, firmObj.address, firmObj.contact)}} />
-            <div className="w-full mt-2 transition-all duration-300" dangerouslySetInnerHTML={{__html: getQuoteBillingHTML(design.quoteBillingTemp || 'b-classic-split', ref, date, party, address, contact, design.quoteBillingColor || design.themeColor, design)}} />
+            {/* 🟢 DRAGGABLE LOGO & STAMP FOR QUOTATION */}
+            {['logo', 'stamp'].map((k) => {
+              const slot = design.graphics?.[k];
+              if (!slot || !slot.url) return null;
+              return (
+                <img 
+                  key={k} 
+                  src={slot.url} 
+                  alt={k} 
+                  style={{ 
+                    position: 'absolute', 
+                    left: `${20 + (slot.x || 0)}px`, 
+                    top: `${20 + (slot.y || 0)}px`, 
+                    width: `${slot.size || 80}px`, 
+                    zIndex: 40, 
+                    objectFit: 'contain',
+                    userSelect: 'none'
+                  }} 
+                />
+              );
+            })}
+
+            <div className="w-full transition-all duration-300" dangerouslySetInnerHTML={{__html: getQuoteHeaderHTML(design.headerTemp || 'h-solid-block', design, design.quoteThemeColor || design.themeColor, firmObj.name, firmObj.address, firmObj.contact)}} />
+            <div className="w-full mt-2 transition-all duration-300" dangerouslySetInnerHTML={{__html: getQuoteBillingHTML(design.billingTemp || 'b-classic-split', ref, date, party, address, contact, design.quoteThemeColor || design.themeColor, design)}} />
 
             <div className="overflow-x-auto mt-4 w-full">
                 <table className={`w-full text-left border-collapse ${tableClass}`} style={{tableLayout:'fixed', width:'100%'}}>
@@ -976,15 +1103,50 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                 )
             })()}
 
-            <div className="flex flex-col items-end mt-auto pt-10 w-full relative">
-                <div className="text-center min-w-[220px] mr-[10mm] relative">
-                    <div className="absolute bottom-[28px] left-1/2 -translate-x-1/2 pointer-events-none">
-                        {g.stamp && g.stamp.url && <img src={g.stamp.url} style={{ transform:`translate(${g.stamp.x||0}px, ${g.stamp.y||0}px)` , width:`${g.stamp.s||140}px`}} className="max-h-[140px] object-contain opacity-95 mx-auto" />}
-                    </div>
-                    <div className="h-16"></div>
-                    <p className="border-t-2 border-slate-300 pt-1.5 font-black text-xs uppercase tracking-wider">For {firmObj.name}</p>
-                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-1">Authorised Signatory</p>
-                </div>
+            <div className="mt-auto pt-6 border-t border-slate-200 flex justify-between items-end relative z-10 w-full">
+              <div 
+                style={{ 
+                  fontFamily: design.quoteTermFontFam || 'Arial',
+                  fontSize: `${design.quoteTermFontSize || 10}px`,
+                  color: design.quoteTermFontColor || '#64748b',
+                  fontWeight: design.quoteTermFontBold ? 'bold' : 'normal',
+                  fontStyle: design.quoteTermFontItalic ? 'italic' : 'normal',
+                  textDecoration: design.quoteTermFontUnderline ? 'underline' : 'none',
+                  transform: `translate(${design.quoteTermX || 0}px, ${design.quoteTermY || 0}px)`,
+                  maxWidth: '450px',
+                  whiteSpace: 'pre-wrap'
+                }}
+              >
+                {design.quoteTermText || '* Terms & Conditions: Validity 30 days.'}
+              </div>
+              <div 
+                className="ml-auto text-center min-w-[220px]" 
+                style={{ 
+                  fontFamily: design.sigFont || 'Arial', 
+                  color: design.sigColor || '#000000',
+                  transform: `translate(${design.sigX || 0}px, ${design.sigY || 0}px)`
+                }}
+              >
+                <p style={{ 
+                  fontSize: `${design.sigSize || 14}px`, 
+                  fontWeight: design.sigBold ? '900' : 'normal', 
+                  fontStyle: design.sigItalic ? 'italic' : 'normal',
+                  textDecoration: design.sigUnderline ? 'underline' : 'none',
+                  wordBreak: 'break-word',
+                  lineHeight: '1.2'
+                }}>
+                  For {firmObj.name}
+                </p>
+                <div className="h-12"></div>
+                <p style={{ 
+                  fontSize: `${design.sigSize || 14}px`, 
+                  fontWeight: design.sigBold ? '900' : 'normal', 
+                  fontStyle: design.sigItalic ? 'italic' : 'normal',
+                  textDecoration: design.sigUnderline ? 'underline' : 'none'
+                }}>
+                  Authorised Signature
+                </p>
+              </div>
             </div>
           </div>
       );
@@ -1026,7 +1188,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                 <div className="origin-top transform scale-[0.4] sm:scale-[0.55] md:scale-[0.7] lg:scale-[0.95] transition-transform drop-shadow-2xl mb-[50px] sm:mb-[100px]">
                     {renderA4Quotation({
                         firmObj: firms.find(f => f.name === activePreviewQuote.vendor) || firms[0] || {},
-                        design: firmTemplates[firms.find(f => f.name === activePreviewQuote.vendor)?.id] || currentDesign,
+                        design: firmTemplates[`${firms.find(f => f.name === activePreviewQuote.vendor)?.id || ''}_quotation`] || firmTemplates[firms.find(f => f.name === activePreviewQuote.vendor)?.id] || currentDesign,
                         party: activePreviewQuote.party,
                         address: getCustomerAddress(activePreviewQuote.party),
                         contact: customers.find(c => c.name.toLowerCase() === (activePreviewQuote.party||'').toLowerCase())?.contact || '',
@@ -1235,16 +1397,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
             <div className="hidden lg:flex lg:col-span-7 bg-slate-300 p-6 rounded-2xl shadow-inner border border-slate-400 justify-center items-center overflow-y-auto overflow-x-hidden h-[78vh] w-full custom-scrollbar relative">
               <div className="m-auto flex justify-center items-center py-10 w-full">
                 <div className="origin-center transform scale-[0.5] sm:scale-[0.6] md:scale-[0.7] lg:scale-[0.65] xl:scale-[0.75] transition-transform shadow-2xl bg-white">
-                    {renderA4Quotation({
-                       firmObj: activeFirmObj,
-                       design: currentDesign,
-                       party: formData.client,
-                       address: formData.address,
-                       contact: formData.contact,
-                       date: toDDMMYYYY(formData.issueDate),
-                       ref: formData.serialNo,
-                       itemsData: items
-                     }, 'create-quote-print-area', false)}
+                    {renderA4Quotation(createPayload, 'create-quote-print-area', false)}
                 </div>
               </div>
             </div>
@@ -1462,7 +1615,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
 
                     <div className="flex items-center justify-between gap-1 pt-2 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
                       <button onClick={(e) => handleViewQuote(e, q)} className="flex-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 py-2 px-1 rounded-lg text-[10px] font-black uppercase border border-slate-200 transition-colors text-center flex items-center justify-center gap-1">
-                        <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                        <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3 z"/></svg>
                         View
                       </button>
                       <button onClick={(e) => handleEditQuote(e, q)} className="flex-1 bg-slate-100 hover:bg-orange-50 text-slate-700 hover:text-orange-600 py-2 px-1 rounded-lg text-[10px] font-black uppercase border border-slate-200 transition-colors text-center flex items-center justify-center gap-1">

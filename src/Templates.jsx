@@ -21,10 +21,7 @@ const logActionToBackend = async (actionText) => {
   try {
     const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
     let activeName = "Admin";
-    
-    if (role === "ADMIN") {
-      activeName = "Admin";
-    } else {
+    if (role !== "ADMIN") {
       try {
         const activeUser = JSON.parse(localStorage.getItem("ERP_Active_Staff_Data") || "{}");
         activeName = activeUser?.name || "Staff";
@@ -32,7 +29,6 @@ const logActionToBackend = async (actionText) => {
         activeName = "Staff";
       }
     }
-
     const formattedAction = `${activeName.toUpperCase()}: ${actionText}`;
     await fetch(`${BACKEND_URL}/api/logs`, {
       method: 'POST',
@@ -41,6 +37,46 @@ const logActionToBackend = async (actionText) => {
     });
   } catch (e) {
     console.error("Log push error:", e);
+  }
+};
+
+const DEFAULT_DESIGN = {
+  themeColor: '#00a67e',
+  certPos: 'left-vert',
+  certPosX: 0,
+  certPosY: 0,
+  certFont: 'Georgia',
+  certSize: 42,
+  certColor: '#dc2626',
+  certBold: true,
+  certItalic: false,
+  certUnderline: false,
+  customFonts: ['Arial', 'Georgia', 'Caveat', 'Times New Roman', 'Verdana'],
+  headerFont: 'Arial', headerSize: 36, headerColor: '#0f172a', headerBold: true, headerItalic: false, headerUnderline: false,
+  docFont: 'Georgia', docSize: 15.5, docColor: '#000000', docBold: false, docItalic: true, docUnderline: false,
+  custFont: 'Caveat', custSize: 20, custColor: '#000000', custBold: false, custItalic: false, custUnderline: false,
+  sigFont: 'Arial', sigSize: 14, sigColor: '#000000', sigBold: false, sigItalic: true, sigUnderline: false, sigX: 0, sigY: 0,
+  a4BgUrl: '', topMargin: 0,
+  quoteThemeColor: '#1e40af',
+  quoteTitle: 'QUOTATION',
+  quoteTitleFont: 'Arial', quoteTitleSize: 32, quoteTitleColor: '#1e40af', quoteTitleBold: true, quoteTitleItalic: false, quoteTitleUnderline: false, quoteTitleX: 0, quoteTitleY: 0,
+  headerTemp: 'h-classic-left',
+  headerFontFam: 'Arial', headerFontSize: 34, headerFontColor: '#dc2626', headerFontBold: true, headerFontItalic: false, headerFontUnderline: false,
+  billingTemp: 'b-classic-split',
+  billingFontFam: 'Arial', billingFontSize: 12, billingFontColor: '#0f172a', billingFontBold: false, billingFontItalic: false, billingFontUnderline: false,
+  tableTemp: 'table-base',
+  tableFontFam: 'Arial', tableFontSize: 12, tableFontColor: '#0f172a', tableFontBold: false, tableFontItalic: false, tableFontUnderline: false,
+  quoteTermText: '* Terms & Conditions: Validity 30 days. E.& O.E.',
+  quoteTermFontFam: 'Arial', quoteTermFontSize: 10, quoteTermFontColor: '#64748b', quoteTermFontBold: false, quoteTermFontItalic: true, quoteTermFontUnderline: false, quoteTermX: 0, quoteTermY: 0,
+  graphics: {
+    logo: { url: '', x: 0, y: 0, size: 100 },
+    stamp: { url: '', x: 0, y: 0, size: 100 },
+    subImage: { url: '', x: 0, y: 0, size: 100 },
+    rightExt: { url: '', x: 0, y: 0, size: 100 },
+    isoLogo: { url: '', x: 0, y: 0, size: 100 },
+    gemLogo: { url: '', x: 0, y: 0, size: 100 },
+    msme: { url: '', x: 0, y: 0, size: 100 },
+    makeInIndia: { url: '', x: 0, y: 0, size: 100 }
   }
 };
 
@@ -77,7 +113,7 @@ export default function Templates() {
           const savedTemplates = localStorage.getItem('ERP_FirmTemplates_v104');
           if (savedTemplates) setFirmTemplates(JSON.parse(savedTemplates));
         } catch(err) {
-          console.error("Template sync storage parse error:", err);
+          console.error("Storage parse error:", err);
         }
       }
     };
@@ -85,7 +121,6 @@ export default function Templates() {
     return () => window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
   }, []);
 
-  // 🟢 FIXED CLOUD TEMPLATES PARSING (Handles Arrays & Objects correctly)
   useEffect(() => {
     const fetchCloudTemplates = async () => {
       try {
@@ -105,13 +140,9 @@ export default function Templates() {
               if (allData.firm_templates) {
                 const ft = allData.firm_templates;
                 if (Array.isArray(ft)) {
-                  ft.forEach(t => {
-                    if (t && t.id) cloudTemplates[t.id] = t;
-                  });
+                  ft.forEach(t => { if (t && t.id) cloudTemplates[t.id] = t; });
                 } else if (typeof ft === 'object') {
-                  Object.values(ft).forEach(t => {
-                    if (t && t.id) cloudTemplates[t.id] = t;
-                  });
+                  Object.values(ft).forEach(t => { if (t && t.id) cloudTemplates[t.id] = t; });
                 }
               }
               if (allData.companies) {
@@ -154,91 +185,43 @@ export default function Templates() {
     }
   }, [designMode, firms]);
 
-  const [currentDesign, setCurrentDesign] = useState({
-    themeColor: '#00a67e',
-    certPos: 'left-vert',
-    certPosX: 0,
-    certPosY: 0,
-    certFont: 'Georgia',
-    certSize: 42,
-    certColor: '#dc2626',
-    certBold: true,
-    certItalic: false,
-    certUnderline: false,
-    customFonts: ['Arial', 'Georgia', 'Caveat', 'Times New Roman', 'Verdana'],
-    headerFont: 'Arial', headerSize: 36, headerColor: '#0f172a', headerBold: true, headerItalic: false, headerUnderline: false,
-    docFont: 'Georgia', docSize: 15.5, docColor: '#000000', docBold: false, docItalic: true, docUnderline: false,
-    custFont: 'Caveat', custSize: 20, custColor: '#000000', custBold: false, custItalic: false, custUnderline: false,
-    sigFont: 'Arial',
-    sigSize: 14,
-    sigColor: '#000000',
-    sigBold: false,
-    sigItalic: true,
-    sigUnderline: false,
-    sigX: 0,
-    sigY: 0,
-    a4BgUrl: '',
-    topMargin: 0,
-    quoteThemeColor: '#1e40af',
-    quoteTitle: 'QUOTATION',
-    quoteTitleFont: 'Arial',
-    quoteTitleSize: 32,
-    quoteTitleColor: '#1e40af',
-    quoteTitleBold: true,
-    quoteTitleItalic: false,
-    quoteTitleUnderline: false,
-    quoteTitleX: 0,
-    quoteTitleY: 0,
-    headerTemp: 'h-classic-left',
-    headerFontFam: 'Arial', headerFontSize: 34, headerFontColor: '#dc2626', headerFontBold: true, headerFontItalic: false, headerFontUnderline: false,
-    billingTemp: 'b-classic-split',
-    billingFontFam: 'Arial', billingFontSize: 12, billingFontColor: '#0f172a', billingFontBold: false, billingFontItalic: false, billingFontUnderline: false,
-    tableTemp: 'table-base',
-    tableFontFam: 'Arial', tableFontSize: 12, tableFontColor: '#0f172a', tableFontBold: false, tableFontItalic: false, tableFontUnderline: false,
-    quoteTermText: '* Terms & Conditions: Validity 30 days. E.& O.E.',
-    quoteTermFontFam: 'Arial',
-    quoteTermFontSize: 10,
-    quoteTermFontColor: '#64748b',
-    quoteTermFontBold: false,
-    quoteTermFontItalic: true,
-    quoteTermFontUnderline: false,
-    quoteTermX: 0,
-    quoteTermY: 0,
-    graphics: {
-      logo: { url: '', x: 0, y: 0, size: 100 },
-      stamp: { url: '', x: 0, y: 0, size: 100 },
-      subImage: { url: '', x: 0, y: 0, size: 100 },
-      rightExt: { url: '', x: 0, y: 0, size: 100 },
-      isoLogo: { url: '', x: 0, y: 0, size: 100 },
-      gemLogo: { url: '', x: 0, y: 0, size: 100 },
-      msme: { url: '', x: 0, y: 0, size: 100 },
-      makeInIndia: { url: '', x: 0, y: 0, size: 100 }
-    }
-  });
-
+  const [currentDesign, setCurrentDesign] = useState(DEFAULT_DESIGN);
   const templateKey = `${selectedFirmId}_${designMode}`;
 
+  // 🟢 NON-LOOPING LOAD EFFECT
   useEffect(() => {
     if (selectedFirmId) {
-      if (firmTemplates[templateKey]) {
-        setCurrentDesign(prev => ({ ...prev, ...firmTemplates[templateKey] }));
-      } else if (firmTemplates[selectedFirmId]) {
-        setCurrentDesign(prev => ({ ...prev, ...firmTemplates[selectedFirmId] }));
+      const savedTemplate = firmTemplates[templateKey] || firmTemplates[selectedFirmId];
+      if (savedTemplate) {
+        setCurrentDesign({
+          ...DEFAULT_DESIGN,
+          ...savedTemplate,
+          graphics: {
+            ...DEFAULT_DESIGN.graphics,
+            ...(savedTemplate.graphics || {})
+          }
+        });
+      } else {
+        setCurrentDesign(DEFAULT_DESIGN);
       }
     }
-  }, [selectedFirmId, designMode, firmTemplates]);
+  }, [selectedFirmId, designMode]);
 
+  // 🟢 NON-LOOPING SAVE EFFECT
   useEffect(() => {
-    if (selectedFirmId) {
+    if (selectedFirmId && currentDesign) {
       try {
-        const updated = { ...firmTemplates, [templateKey]: currentDesign };
-        setFirmTemplates(updated);
-        localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updated));
+        const currentSaved = JSON.parse(localStorage.getItem('ERP_FirmTemplates_v104') || '{}');
+        if (JSON.stringify(currentSaved[templateKey]) !== JSON.stringify(currentDesign)) {
+          const updated = { ...currentSaved, [templateKey]: currentDesign };
+          setFirmTemplates(updated);
+          localStorage.setItem('ERP_FirmTemplates_v104', JSON.stringify(updated));
+        }
       } catch (e) {
         console.error("Storage error", e);
       }
     }
-  }, [currentDesign, selectedFirmId, designMode]);
+  }, [currentDesign, selectedFirmId, templateKey]);
 
   const handleSaveTemplateToCloud = async () => {
     if (!selectedFirmId) return;
@@ -309,13 +292,8 @@ export default function Templates() {
   });
   const [newCapacity, setNewCapacity] = useState('');
 
-  useEffect(() => {
-    localStorage.setItem('ERP_CertCategories_v104', JSON.stringify(categories));
-  }, [categories]);
-
-  useEffect(() => {
-    localStorage.setItem('ERP_CertCapacities_v104', JSON.stringify(capacities));
-  }, [capacities]);
+  useEffect(() => { localStorage.setItem('ERP_CertCategories_v104', JSON.stringify(categories)); }, [categories]);
+  useEffect(() => { localStorage.setItem('ERP_CertCapacities_v104', JSON.stringify(capacities)); }, [capacities]);
 
   const handleAddCategory = (e) => {
     e.preventDefault();
@@ -325,9 +303,7 @@ export default function Templates() {
     setNewCategory('');
   };
 
-  const removeCategory = (catToRemove) => {
-    setCategories(categories.filter(c => c !== catToRemove));
-  };
+  const removeCategory = (catToRemove) => { setCategories(categories.filter(c => c !== catToRemove)); };
 
   const handleAddCapacity = (e) => {
     e.preventDefault();
@@ -337,19 +313,14 @@ export default function Templates() {
     setNewCapacity('');
   };
 
-  const removeCapacity = (capToRemove) => {
-    setCapacities(capacities.filter(c => c !== capToRemove));
-  };
+  const removeCapacity = (capToRemove) => { setCapacities(capacities.filter(c => c !== capToRemove)); };
 
   const handleAddFont = () => {
     const fName = prompt("Enter new font family name (e.g., Roboto, Open Sans):");
     if (fName && fName.trim()) {
       const trimmed = fName.trim();
       if (!currentDesign.customFonts.includes(trimmed)) {
-        setCurrentDesign(prev => ({
-          ...prev,
-          customFonts: [...prev.customFonts, trimmed]
-        }));
+        setCurrentDesign(prev => ({ ...prev, customFonts: [...prev.customFonts, trimmed] }));
       }
     }
   };
@@ -360,10 +331,7 @@ export default function Templates() {
       return;
     }
     if (confirm(`Are you sure you want to delete font '${fontToDelete}'?`)) {
-      setCurrentDesign(prev => ({
-        ...prev,
-        customFonts: prev.customFonts.filter(f => f !== fontToDelete)
-      }));
+      setCurrentDesign(prev => ({ ...prev, customFonts: prev.customFonts.filter(f => f !== fontToDelete) }));
     }
   };
 
@@ -376,19 +344,11 @@ export default function Templates() {
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
-
           if (width > height) {
-            if (width > maxWidth) {
-              height *= maxWidth / width;
-              width = maxWidth;
-            }
+            if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
           } else {
-            if (height > maxHeight) {
-              width *= maxHeight / height;
-              height = maxHeight;
-            }
+            if (height > maxHeight) { width *= maxHeight / height; height = maxHeight; }
           }
-
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
@@ -456,10 +416,7 @@ export default function Templates() {
     e.stopPropagation();
     setDraggingKey(key);
     const g = currentGraphics[key] || { x: 0, y: 0 };
-    setDragOffset({
-      x: e.clientX - g.x,
-      y: e.clientY - g.y
-    });
+    setDragOffset({ x: e.clientX - g.x, y: e.clientY - g.y });
   };
 
   const handleMouseMove = (e) => {
@@ -479,9 +436,7 @@ export default function Templates() {
     }));
   };
 
-  const handleMouseUp = () => {
-    setDraggingKey(null);
-  };
+  const handleMouseUp = () => { setDraggingKey(null); };
 
   const activeFirmObj = firms.find(f => f.id === selectedFirmId) || filteredFirms[0] || firms[0] || { name: 'Shaney Enterprise', address: 'Junagadh', contact: '+91 9726350101' };
   const currentGraphics = currentDesign.graphics || {};
@@ -489,7 +444,6 @@ export default function Templates() {
   const getQuoteHeaderHTML = () => {
     const v = currentDesign;
     const cColor = v.quoteThemeColor;
-    
     const tB = v.quoteTitleBold ? "font-weight: 900;" : "font-weight: normal;";
     const tI = v.quoteTitleItalic ? "font-style: italic;" : "font-style: normal;";
     const tU = v.quoteTitleUnderline ? "text-decoration: underline;" : "";
@@ -507,12 +461,9 @@ export default function Templates() {
     const hF = v.headerFontFam || "Arial";
     const hS = v.headerFontSize ? v.headerFontSize : 34;
     const hC = v.headerFontColor || cColor;
-    
     const subSizeVal = Math.max(10, Math.floor(hS * 0.4));
-    
     const nameStyle = `font-family: '${hF}', sans-serif; font-size: ${hS}px; ${hB} ${hI} ${hU} line-height: 1.1; display: inline-block;`;
     const subStyle = `font-size: ${subSizeVal}px; opacity: 0.85; margin-top: 6px; display: block; font-family: '${hF}', sans-serif;`;
-
     const nameStr = `<span style="${nameStyle}">${activeFirmObj.name}</span>`;
     const addrStr = `<div style="${subStyle}">${activeFirmObj.address || ""}</div>`;
 
@@ -540,17 +491,14 @@ export default function Templates() {
   const getQuoteBillingHTML = () => {
     const v = currentDesign;
     const cColor = v.quoteThemeColor;
-    
     const bB = v.billingFontBold ? "font-weight: 900;" : "font-weight: normal;";
     const bI = v.billingFontItalic ? "font-style: italic;" : "font-style: normal;";
     const bU = v.billingFontUnderline ? "text-decoration: underline;" : "";
     const bF = v.billingFontFam || "Arial";
     const bS = v.billingFontSize ? v.billingFontSize : 13;
     const bC = v.billingFontColor || '#0f172a';
-    
     const bSubSize = Math.max(9, Math.floor(bS * 0.85)); 
     const bSmallSize = Math.max(8, Math.floor(bS * 0.70)); 
-
     const bNameStyle = `font-family: '${bF}', sans-serif; font-size: ${bS}px; ${bB} ${bI} ${bU}; line-height: 1.2; display: block; margin-top: 2px;`;
     const cName = `<span style="${bNameStyle}">AJMERI DEVELOPERS</span>`;
     const cAddr = "702/A, CORPORATE PLAZA, VADODARA, GUJARAT";
@@ -597,16 +545,14 @@ export default function Templates() {
     }
   };
 
-  const getTableStyle = () => {
-    return {
-      fontFamily: currentDesign.tableFontFam,
-      fontSize: `${currentDesign.tableFontSize}px`,
-      color: currentDesign.tableFontColor,
-      fontWeight: currentDesign.tableFontBold ? 'bold' : 'normal',
-      fontStyle: currentDesign.tableFontItalic ? 'italic' : 'normal',
-      textDecoration: currentDesign.tableFontUnderline ? 'underline' : 'none'
-    };
-  };
+  const getTableStyle = () => ({
+    fontFamily: currentDesign.tableFontFam,
+    fontSize: `${currentDesign.tableFontSize}px`,
+    color: currentDesign.tableFontColor,
+    fontWeight: currentDesign.tableFontBold ? 'bold' : 'normal',
+    fontStyle: currentDesign.tableFontItalic ? 'italic' : 'normal',
+    textDecoration: currentDesign.tableFontUnderline ? 'underline' : 'none'
+  });
 
   const renderA4Content = () => {
     return designMode === 'certificate' ? (
@@ -616,7 +562,7 @@ export default function Templates() {
           backgroundImage: currentDesign.a4BgUrl ? `url(${currentDesign.a4BgUrl})` : 'none',
           backgroundSize: 'cover',
           backgroundPosition: 'center',
-          paddingTop: `${32 + (currentDesign.topMargin || 0)}px`
+          paddingTop: `${20 + (currentDesign.topMargin || 0)}px`
         }}
       >
         {Object.entries(currentGraphics).map(([k, g]) => {
@@ -641,10 +587,10 @@ export default function Templates() {
           );
         })}
 
-        <div className="flex h-full w-full pt-[20px] pb-[60px] pl-[10px] pr-[20px] flex-row z-20 relative pointer-events-none">
+        <div className="flex h-full w-full pt-[10px] pb-[40px] pl-[10px] pr-[20px] flex-row z-20 relative pointer-events-none">
           {currentDesign.certPos !== 'none' && (
             <div 
-              className={currentDesign.certPos === 'top-center' ? 'absolute left-1/2 -translate-x-1/2 top-0 z-30 w-full text-center' : 'w-[70px] flex-shrink-0 flex flex-col items-center justify-start pt-[100px] z-30'} 
+              className={currentDesign.certPos === 'top-center' ? 'absolute left-1/2 -translate-x-1/2 top-0 z-30 w-full text-center' : 'w-[70px] flex-shrink-0 flex flex-col items-center justify-start pt-[80px] z-30'} 
               style={{ transform: `translate(${currentDesign.certPosX}px, ${currentDesign.certPosY}px)` }}
             >
               <div 
@@ -669,12 +615,12 @@ export default function Templates() {
             </div>
           )}
 
-          <div className="flex-grow flex flex-col pt-2 w-[calc(100%-70px)] h-full pointer-events-auto">
-            <div className="flex items-center mb-4 w-full border-b-[3px] pb-4 flex-shrink-0 mt-5 justify-between" style={{ borderColor: currentDesign.a4BgUrl ? 'transparent' : currentDesign.themeColor }}>
-              <div className="flex flex-col justify-center">
+          <div className="flex-grow flex flex-col pt-1 w-[calc(100%-70px)] h-full pointer-events-auto">
+            <div className="flex items-start mb-4 w-full border-b-[3px] pb-3 flex-shrink-0 justify-between" style={{ borderColor: currentDesign.a4BgUrl ? 'transparent' : currentDesign.themeColor }}>
+              <div className="flex flex-col justify-center max-w-[70%]">
                 {!currentDesign.a4BgUrl && (
                   <h1 
-                    className="leading-none uppercase tracking-tight" 
+                    className="leading-tight uppercase tracking-tight break-words" 
                     style={{ 
                       fontFamily: currentDesign.headerFont, 
                       fontSize: `${currentDesign.headerSize}px`, 
@@ -692,7 +638,7 @@ export default function Templates() {
                 </div>
               </div>
               <div 
-                className="text-right self-end"
+                className="text-right shrink-0 pt-1"
                 style={{ 
                   fontFamily: currentDesign.docFont, 
                   fontSize: `${Math.max(10, currentDesign.docSize - 3)}px`, 
@@ -709,7 +655,7 @@ export default function Templates() {
 
             {currentDesign.a4BgUrl && <div className="h-10"></div>}
 
-            <div className="w-full mb-4 leading-[1.6] pl-[5mm] pr-[15px] flex-shrink-0">
+            <div className="w-full mb-3 leading-[1.5] pl-[5mm] pr-[15px] flex-shrink-0">
               <p style={{ fontFamily: currentDesign.docFont, color: currentDesign.docColor, fontSize: `${currentDesign.docSize}px`, fontWeight: currentDesign.docBold ? 'bold' : 'normal', fontStyle: currentDesign.docItalic ? 'italic' : 'normal', textDecoration: currentDesign.docUnderline ? 'underline' : 'none' }}>
                 Certified M/s:- <span className="ml-2 uppercase underline" style={{ fontFamily: currentDesign.custFont, fontSize: `${currentDesign.custSize}px`, color: currentDesign.custColor, fontWeight: currentDesign.custBold ? 'bold' : 'normal', fontStyle: currentDesign.custItalic ? 'italic' : 'normal', textDecoration: currentDesign.custUnderline ? 'underline' : 'none' }}>AJMERI DEVELOPERS</span>
               </p>
@@ -718,7 +664,7 @@ export default function Templates() {
               </p>
             </div>
 
-            <div className="w-full leading-[1.5] mb-4 text-center px-4 flex-shrink-0" style={{ fontFamily: currentDesign.docFont, color: currentDesign.docColor, fontSize: `${currentDesign.docSize}px`, fontWeight: currentDesign.docBold ? 'bold' : 'normal', fontStyle: currentDesign.docItalic ? 'italic' : 'normal', textDecoration: currentDesign.docUnderline ? 'underline' : 'none' }}>
+            <div className="w-full leading-[1.4] mb-3 text-center px-4 flex-shrink-0" style={{ fontFamily: currentDesign.docFont, color: currentDesign.docColor, fontSize: `${currentDesign.docSize}px`, fontWeight: currentDesign.docBold ? 'bold' : 'normal', fontStyle: currentDesign.docItalic ? 'italic' : 'normal', textDecoration: currentDesign.docUnderline ? 'underline' : 'none' }}>
               <p>We certify that the fire extinguishers mentioned below</p>
               <p>Are tested and refilled as per the relevant Indian standard.</p>
               <p>This extinguishers are refilled on Date :- <span className="text-red-600 font-mono">12-12-2025</span></p>
@@ -759,7 +705,7 @@ export default function Templates() {
               </table>
             </div>
 
-            <div className="mt-auto pt-4 flex justify-between items-end">
+            <div className="mt-auto pt-2 flex justify-between items-end">
               <div className="text-[10px] text-slate-500 font-mono">
                 {!currentDesign.a4BgUrl && (
                   <>
@@ -786,7 +732,7 @@ export default function Templates() {
                 }}>
                   For {activeFirmObj.name}
                 </p>
-                <div className="h-12"></div>
+                <div className="h-10"></div>
                 <p style={{ 
                   fontSize: `${currentDesign.sigSize}px`, 
                   fontWeight: currentDesign.sigBold ? '900' : 'normal', 
@@ -917,14 +863,12 @@ export default function Templates() {
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
     >
-      
       <style dangerouslySetInnerHTML={{__html: `
         .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; background: #fff; }
         .cert-table th { padding: 5px; text-align: center; border: 1px solid #000; background: #f8fafc; font-family: ${currentDesign.docFont}, sans-serif; font-size: ${currentDesign.docSize}px; color: ${currentDesign.docColor}; font-weight: ${currentDesign.docBold ? 'bold' : 'bold'}; font-style: ${currentDesign.docItalic ? 'italic' : 'normal'}; text-decoration: ${currentDesign.docUnderline ? 'underline' : 'none'}; }
         .cert-table td { padding: 4px 5px; text-align: center; border: 1px solid #000; font-family: ${currentDesign.docFont}, sans-serif; font-size: ${currentDesign.docSize}px; color: ${currentDesign.docColor}; font-weight: ${currentDesign.docBold ? 'bold' : 'normal'}; font-style: ${currentDesign.docItalic ? 'italic' : 'normal'}; text-decoration: ${currentDesign.docUnderline ? 'underline' : 'none'}; }
         .cert-table td.left-align { text-align: left; padding-left: 10px; }
         .vert-text-stable { display: flex; flex-direction: column; gap: 8px; font-size: 42px; font-weight: 900; line-height: 1; text-align: center; }
-        
         .table-base th { padding: 12px 10px; border-bottom: 2px solid ${currentDesign.quoteThemeColor}; text-transform: uppercase; }
         .table-base td { padding: 10px; border-bottom: 1px solid #f1f5f9; }
         .table-striped tbody tr:nth-child(even) { background-color: #f8fafc; }
@@ -953,20 +897,14 @@ export default function Templates() {
         <div className="fixed inset-0 z-[99999] flex flex-col justify-end bg-slate-900/70 backdrop-blur-sm transition-all duration-300 lg:hidden">
           <div className="w-full h-[90vh] bg-slate-100 rounded-t-3xl flex flex-col shadow-2xl overflow-hidden animate-[slideUp_0.3s]">
             <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0 shadow-sm z-10">
-              <h2 className="font-black text-slate-800 text-sm tracking-widest uppercase flex items-center gap-2">
-                <svg className="w-4 h-4 text-indigo-600 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg> LIVE DOCUMENT PREVIEW
-              </h2>
+              <h2 className="font-black text-slate-800 text-sm tracking-widest uppercase flex items-center gap-2">LIVE DOCUMENT PREVIEW</h2>
               <button onClick={() => setIsMobilePreviewOpen(false)} className="text-slate-400 hover:text-red-500 font-bold text-2xl leading-none">&times;</button>
             </div>
             <div className="flex-1 bg-slate-500 overflow-y-auto overflow-x-hidden flex justify-center items-start py-4 w-full custom-scrollbar">
-              <div className="origin-top transform scale-[0.45] transition-transform drop-shadow-2xl mb-10">
-                {renderA4Content()}
-              </div>
+              <div className="origin-top transform scale-[0.45] transition-transform drop-shadow-2xl mb-10">{renderA4Content()}</div>
             </div>
             <div className="p-4 bg-white border-t border-slate-200 flex justify-end items-center shrink-0 z-10">
-              <button onClick={() => setIsMobilePreviewOpen(false)} className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer">
-                CLOSE
-              </button>
+              <button onClick={() => setIsMobilePreviewOpen(false)} className="w-full bg-slate-800 hover:bg-slate-900 text-white py-3 rounded-xl text-xs font-black uppercase tracking-widest transition-all cursor-pointer">CLOSE</button>
             </div>
           </div>
         </div>
@@ -974,163 +912,425 @@ export default function Templates() {
 
       <div className="max-w-7xl mx-auto pb-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        
-        <div className="lg:col-span-5 flex flex-col gap-5 max-h-[85vh] overflow-y-auto pr-2 custom-scrollbar">
-          
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3">
-            <div className="flex justify-between items-center">
-              <label className="text-[11px] font-black text-slate-700 uppercase tracking-widest">
-                ⚙️ Select Design Mode
-              </label>
-              <button 
-                type="button" 
-                onClick={() => setIsMobilePreviewOpen(true)} 
-                className="lg:hidden bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold text-xs px-3 py-2 rounded-lg uppercase transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
-              >
-                <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-                <span>Preview</span>
-              </button>
+          <div className="lg:col-span-5 flex flex-col gap-5 max-h-[85vh] overflow-y-auto pr-2 custom-scrollbar">
+            
+            <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3">
+              <div className="flex justify-between items-center">
+                <label className="text-[11px] font-black text-slate-700 uppercase tracking-widest">⚙️ Select Design Mode</label>
+                <button type="button" onClick={() => setIsMobilePreviewOpen(true)} className="lg:hidden bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold text-xs px-3 py-2 rounded-lg uppercase transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer">
+                  <span>Preview</span>
+                </button>
+              </div>
+              <select value={designMode} onChange={(e) => setDesignMode(e.target.value)} className="w-full bg-[#0f172a] text-white text-xs font-bold py-3 px-4 rounded-xl cursor-pointer shadow-md border-0 outline-none hover:bg-slate-800 transition-all text-center">
+                <option value="certificate">📄 Certificate Layouts</option>
+                <option value="quotation">Quotation Layouts</option>
+              </select>
             </div>
-            <select 
-              value={designMode}
-              onChange={(e) => setDesignMode(e.target.value)}
-              className="w-full bg-[#0f172a] text-white text-xs font-bold py-3 px-4 rounded-xl cursor-pointer shadow-md border-0 outline-none hover:bg-slate-800 transition-all text-center"
-            >
-              <option value="certificate">📄 Certificate Layouts</option>
-              <option value="quotation">Quotation Layouts</option>
-            </select>
-          </div>
 
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col gap-3">
-            <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-              <h3 className="font-black text-slate-800 text-[11px] uppercase text-indigo-600">
-                🎨 Edit Graphics For Firm ({designMode}):
-              </h3>
-              <button 
-                type="button" 
-                onClick={handleSaveTemplateToCloud}
-                className="bg-[#00a67e] hover:bg-emerald-600 text-white font-black text-[10px] px-3 py-1.5 rounded-lg uppercase shadow-sm transition-all cursor-pointer"
-              >
-                💾 Save to Cloud
-              </button>
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 flex flex-col gap-3">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                <h3 className="font-black text-slate-800 text-[11px] uppercase text-indigo-600">🎨 Edit Graphics For Firm ({designMode}):</h3>
+                <button type="button" onClick={handleSaveTemplateToCloud} className="bg-[#00a67e] hover:bg-emerald-600 text-white font-black text-[10px] px-3 py-1.5 rounded-lg uppercase shadow-sm transition-all cursor-pointer">💾 Save to Cloud</button>
+              </div>
+              <select value={selectedFirmId} onChange={(e) => setSelectedFirmId(e.target.value)} className="w-full text-xs font-bold py-2.5 px-3 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-900 outline-none cursor-pointer">
+                {filteredFirms.map(f => (
+                  <option key={f.id} value={f.id}>{f.type === 'certificate' ? '📄' : '🧾'} {f.name}</option>
+                ))}
+              </select>
             </div>
-            <select 
-              value={selectedFirmId}
-              onChange={(e) => setSelectedFirmId(e.target.value)}
-              className="w-full text-xs font-bold py-2.5 px-3 rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-900 outline-none cursor-pointer"
-            >
-              {filteredFirms.map(f => (
-                <option key={f.id} value={f.id}>
-                  {f.type === 'certificate' ? '📄' : '🧾'} {f.name}
-                </option>
-              ))}
-            </select>
-          </div>
 
-          {designMode === 'certificate' && (
-            <div className="flex flex-col gap-4 animate-[fadeIn_0.2s_ease-in-out]">
-              <div className="bg-teal-50 border border-teal-200 p-4 rounded-2xl shadow-sm flex flex-col gap-4">
-                <h3 className="font-black text-teal-800 text-xs uppercase border-b border-teal-200 pb-2">🖼️ A4 Layout, Theme & Graphics</h3>
-                
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5">Theme Color</label>
-                  <input 
-                    type="color" 
-                    value={currentDesign.themeColor} 
-                    onChange={(e) => setCurrentDesign({...currentDesign, themeColor: e.target.value})} 
-                    className="w-full h-9 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-white shadow-sm" 
-                  />
-                </div>
+            {designMode === 'certificate' && (
+              <div className="flex flex-col gap-4 animate-[fadeIn_0.2s_ease-in-out]">
+                <div className="bg-teal-50 border border-teal-200 p-4 rounded-2xl shadow-sm flex flex-col gap-4">
+                  <h3 className="font-black text-teal-800 text-xs uppercase border-b border-teal-200 pb-2">🖼️ A4 Layout, Theme & Graphics</h3>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5">Theme Color</label>
+                    <input type="color" value={currentDesign.themeColor} onChange={(e) => setCurrentDesign({...currentDesign, themeColor: e.target.value})} className="w-full h-9 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-white shadow-sm" />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5">"Certificate" Position</label>
+                    <div className="grid grid-cols-12 gap-2">
+                      <select value={currentDesign.certPos} onChange={(e) => setCurrentDesign({...currentDesign, certPos: e.target.value})} className="col-span-6 text-xs font-bold py-2 px-3 rounded-xl border border-slate-300 bg-white text-slate-700 outline-none shadow-sm cursor-pointer">
+                        <option value="left-vert">Vertical Left</option>
+                        <option value="top-center">Top Centered</option>
+                        <option value="none">Hidden</option>
+                      </select>
+                      <input type="number" value={currentDesign.certPosX} onChange={(e) => setCurrentDesign({...currentDesign, certPosX: Number(e.target.value)})} placeholder="X" className="col-span-3 text-xs py-2 text-center font-mono font-bold rounded-xl border border-slate-300 bg-white shadow-sm" />
+                      <input type="number" value={currentDesign.certPosY} onChange={(e) => setCurrentDesign({...currentDesign, certPosY: Number(e.target.value)})} placeholder="Y" className="col-span-3 text-xs py-2 text-center font-mono font-bold rounded-xl border border-slate-300 bg-white shadow-sm" />
+                    </div>
+                  </div>
 
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1.5">"Certificate" Position</label>
-                  <div className="grid grid-cols-12 gap-2">
-                    <select 
-                      value={currentDesign.certPos} 
-                      onChange={(e) => setCurrentDesign({...currentDesign, certPos: e.target.value})} 
-                      className="col-span-6 text-xs font-bold py-2 px-3 rounded-xl border border-slate-300 bg-white text-slate-700 outline-none shadow-sm cursor-pointer"
-                    >
-                      <option value="left-vert">Vertical Left</option>
-                      <option value="top-center">Top Centered</option>
-                      <option value="none">Hidden</option>
-                    </select>
-                    <input type="number" value={currentDesign.certPosX} onChange={(e) => setCurrentDesign({...currentDesign, certPosX: Number(e.target.value)})} placeholder="X" className="col-span-3 text-xs py-2 text-center font-mono font-bold rounded-xl border border-slate-300 bg-white shadow-sm" />
-                    <input type="number" value={currentDesign.certPosY} onChange={(e) => setCurrentDesign({...currentDesign, certPosY: Number(e.target.value)})} placeholder="Y" className="col-span-3 text-xs py-2 text-center font-mono font-bold rounded-xl border border-slate-300 bg-white shadow-sm" />
+                  <div className="flex flex-col gap-1.5">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Certificate Text Font Setup</label>
+                    <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
+                      <select value={currentDesign.certFont} onChange={(e) => setCurrentDesign({...currentDesign, certFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                        {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <div className="col-span-2 flex items-center gap-0.5 justify-center">
+                        <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
+                        <button type="button" onClick={() => handleDeleteFont(currentDesign.certFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      </div>
+                      <input type="number" value={currentDesign.certSize} onChange={(e) => setCurrentDesign({...currentDesign, certSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, certBold: !currentDesign.certBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.certBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, certItalic: !currentDesign.certItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.certItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, certUnderline: !currentDesign.certUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.certUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
+                      <input type="color" value={currentDesign.certColor} onChange={(e) => setCurrentDesign({...currentDesign, certColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Header Font Setup</label>
+                    <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
+                      <select value={currentDesign.headerFont} onChange={(e) => setCurrentDesign({...currentDesign, headerFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                        {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <div className="col-span-2 flex items-center gap-0.5 justify-center">
+                        <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
+                        <button type="button" onClick={() => handleDeleteFont(currentDesign.headerFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      </div>
+                      <input type="number" value={currentDesign.headerSize} onChange={(e) => setCurrentDesign({...currentDesign, headerSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerBold: !currentDesign.headerBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.headerBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerItalic: !currentDesign.headerItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.headerItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerUnderline: !currentDesign.headerUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.headerUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
+                      <input type="color" value={currentDesign.headerColor} onChange={(e) => setCurrentDesign({...currentDesign, headerColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Doc Font Setup (Body, Date, Table)</label>
+                    <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
+                      <select value={currentDesign.docFont} onChange={(e) => setCurrentDesign({...currentDesign, docFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                        {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <div className="col-span-2 flex items-center gap-0.5 justify-center">
+                        <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
+                        <button type="button" onClick={() => handleDeleteFont(currentDesign.docFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      </div>
+                      <input type="number" value={currentDesign.docSize} onChange={(e) => setCurrentDesign({...currentDesign, docSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, docBold: !currentDesign.docBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.docBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, docItalic: !currentDesign.docItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.docItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, docUnderline: !currentDesign.docUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.docUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
+                      <input type="color" value={currentDesign.docColor} onChange={(e) => setCurrentDesign({...currentDesign, docColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Cust Font Setup (Customer & Address)</label>
+                    <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
+                      <select value={currentDesign.custFont} onChange={(e) => setCurrentDesign({...currentDesign, custFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                        {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <div className="col-span-2 flex items-center gap-0.5 justify-center">
+                        <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
+                        <button type="button" onClick={() => handleDeleteFont(currentDesign.custFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      </div>
+                      <input type="number" value={currentDesign.custSize} onChange={(e) => setCurrentDesign({...currentDesign, custSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, custBold: !currentDesign.custBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.custBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, custItalic: !currentDesign.custItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.custItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, custUnderline: !currentDesign.custUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.custUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
+                      <input type="color" value={currentDesign.custColor} onChange={(e) => setCurrentDesign({...currentDesign, custColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                    <label className="block text-[10px] font-bold text-slate-700 uppercase">Signature Setup (Center Aligned)</label>
+                    <div className="grid grid-cols-12 gap-1 items-center">
+                      <select value={currentDesign.sigFont} onChange={(e) => setCurrentDesign({...currentDesign, sigFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                        {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <input type="number" value={currentDesign.sigSize} onChange={(e) => setCurrentDesign({...currentDesign, sigSize: Number(e.target.value)})} className="col-span-2 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, sigBold: !currentDesign.sigBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.sigBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, sigItalic: !currentDesign.sigItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.sigItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, sigUnderline: !currentDesign.sigUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.sigUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
+                      <input type="color" value={currentDesign.sigColor} onChange={(e) => setCurrentDesign({...currentDesign, sigColor: e.target.value})} className="col-span-3 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    </div>
+                    <div className="grid grid-cols-12 gap-2 mt-2 pt-2 border-t border-slate-100 items-center">
+                      <span className="col-span-4 text-[10px] font-bold text-slate-500 uppercase">Position X / Y:</span>
+                      <input type="number" value={currentDesign.sigX} onChange={(e) => setCurrentDesign({...currentDesign, sigX: Number(e.target.value)})} placeholder="X" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
+                      <input type="number" value={currentDesign.sigY} onChange={(e) => setCurrentDesign({...currentDesign, sigY: Number(e.target.value)})} placeholder="Y" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
+                    </div>
+                  </div>
+
+                  <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[10px] font-black uppercase text-slate-700">A4 Background</label>
+                      {currentDesign.a4BgUrl && <button onClick={() => setCurrentDesign({...currentDesign, a4BgUrl: ''})} className="text-red-500 font-bold text-xs">Delete</button>}
+                    </div>
+                    <input type="file" accept="image/*" onChange={handleBgFile} className="text-[9px] w-full text-slate-400 cursor-pointer" />
+                    <div>
+                      <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Top Margin (px):</label>
+                      <input type="number" value={currentDesign.topMargin} onChange={(e) => setCurrentDesign({...currentDesign, topMargin: Number(e.target.value)})} className="pro-input text-xs py-1 font-mono font-bold text-center" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { name: 'Top Logo', key: 'logo' },
+                      { name: 'Right Ext', key: 'rightExt' },
+                      { name: 'Sub Image', key: 'subImage' },
+                      { name: 'Stamping', key: 'stamp' },
+                      { name: 'ISO Logo', key: 'isoLogo' },
+                      { name: 'GeM Logo', key: 'gemLogo' },
+                      { name: 'MSME', key: 'msme' },
+                      { name: 'Make In India', key: 'makeInIndia' }
+                    ].map((item) => {
+                      const slotData = currentGraphics[item.key] || { url: '', x: 0, y: 0, size: 100 };
+                      return (
+                        <div key={item.key} className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-2">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[9px] font-black uppercase text-slate-700">{item.name}</label>
+                            {slotData.url && <button onClick={() => removeGraphic(item.key)} className="text-red-500 font-bold text-xs hover:underline">✕ Del</button>}
+                          </div>
+                          <input type="file" accept="image/*" onChange={(e) => handleGraphicFile(item.key, e.target.files[0])} className="text-[8px] w-full text-slate-400 cursor-pointer" />
+                          <div className="grid grid-cols-3 gap-1">
+                            <input type="number" value={slotData.x} onChange={(e) => updateGraphicProp(item.key, 'x', e.target.value)} placeholder="X" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
+                            <input type="number" value={slotData.y} onChange={(e) => updateGraphicProp(item.key, 'y', e.target.value)} placeholder="Y" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
+                            <input type="number" value={slotData.size} onChange={(e) => updateGraphicProp(item.key, 'size', e.target.value)} placeholder="Size" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Certificate Text Font Setup</label>
-                  <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
-                    <select value={currentDesign.certFont} onChange={(e) => setCurrentDesign({...currentDesign, certFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                <div className="bg-red-50 p-4 rounded-xl border border-red-200 shadow-sm">
+                  <h4 className="font-black text-[11px] text-red-900 uppercase mb-2 border-b border-red-200 pb-2">🔥 Main Categories</h4>
+                  <form onSubmit={handleAddCategory} className="flex gap-2 mb-3">
+                    <input type="text" value={newCategory} onChange={(e) => setNewCategory(e.target.value)} className="text-xs py-2 px-3 rounded-xl border border-red-200 bg-white w-full outline-none font-bold" placeholder="New Category..." />
+                    <button type="submit" className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-black uppercase shadow-sm">➕</button>
+                  </form>
+                  <div className="flex flex-wrap gap-1.5">
+                    {categories.map((cat) => (
+                      <span key={cat} className="bg-white border border-red-200 text-red-800 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm">
+                        {cat} <button type="button" onClick={() => removeCategory(cat)} className="text-red-500 hover:text-red-700 font-black">&times;</button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm">
+                  <h4 className="font-black text-[11px] text-blue-900 uppercase mb-2 border-b border-blue-200 pb-2">📏 Capacities</h4>
+                  <form onSubmit={handleAddCapacity} className="flex gap-2 mb-3">
+                    <input type="text" value={newCapacity} onChange={(e) => setNewCapacity(e.target.value)} className="text-xs py-2 px-3 rounded-xl border border-blue-200 bg-white w-full outline-none font-bold" placeholder="New Capacity..." />
+                    <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-black uppercase shadow-sm">➕</button>
+                  </form>
+                  <div className="flex flex-wrap gap-1.5">
+                    {capacities.map((cap) => (
+                      <span key={cap} className="bg-white border border-blue-200 text-blue-800 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm">
+                        {cap} <button type="button" onClick={() => removeCapacity(cap)} className="text-blue-500 hover:text-blue-700 font-black">&times;</button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {designMode === 'quotation' && (
+              <div className="flex flex-col gap-4 mt-2 animate-[fadeIn_0.2s_ease-in-out]">
+                <div className="bg-pink-50 border border-pink-200 p-4 rounded-2xl shadow-sm flex flex-col gap-3">
+                  <h3 className="font-black text-pink-800 text-[11px] uppercase border-b border-pink-200 pb-2">🎨 1. Global & Title Setup</h3>
+                  <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-pink-100 shadow-sm">
+                    <label className="text-[10px] font-bold text-slate-600 uppercase ml-1">Theme Color</label>
+                    <input type="color" value={currentDesign.quoteThemeColor} onChange={(e) => setCurrentDesign({...currentDesign, quoteThemeColor: e.target.value})} className="w-10 h-8 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-white shadow-sm" />
+                  </div>
+                  <div className="flex items-center gap-2 bg-white p-2.5 rounded-xl border border-pink-100 shadow-sm">
+                    <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Title Text:</label>
+                    <input type="text" value={currentDesign.quoteTitle} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitle: e.target.value})} className="flex-1 text-xs font-black text-slate-800 py-1.5 px-3 border border-slate-300 rounded-lg bg-slate-50 outline-none" />
+                  </div>
+
+                  <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-pink-100 shadow-sm mt-1">
+                    <label className="block text-[10px] font-bold text-slate-500 uppercase">Title Font & Position Setup</label>
+                    <div className="grid grid-cols-12 gap-1 items-center">
+                      <select value={currentDesign.quoteTitleFont} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                        {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
+                      </select>
+                      <div className="col-span-2 flex items-center gap-0.5 justify-center">
+                        <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
+                        <button type="button" onClick={() => handleDeleteFont(currentDesign.quoteTitleFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      </div>
+                      <input type="number" value={currentDesign.quoteTitleSize} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTitleBold: !currentDesign.quoteTitleBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.quoteTitleBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTitleItalic: !currentDesign.quoteTitleItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.quoteTitleItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
+                      <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTitleUnderline: !currentDesign.quoteTitleUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.quoteTitleUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
+                      <input type="color" value={currentDesign.quoteTitleColor} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    </div>
+                    <div className="grid grid-cols-12 gap-2 mt-1 pt-2 border-t border-slate-100 items-center">
+                      <span className="col-span-4 text-[10px] font-bold text-slate-500 uppercase">Position X / Y:</span>
+                      <input type="number" value={currentDesign.quoteTitleX} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleX: Number(e.target.value)})} placeholder="X" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
+                      <input type="number" value={currentDesign.quoteTitleY} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleY: Number(e.target.value)})} placeholder="Y" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
+                  <label className="text-[11px] font-black uppercase text-indigo-700 tracking-wider border-b border-slate-100 pb-2">
+                    2. Header Setup (15 Designs)
+                  </label>
+                  <select 
+                    value={currentDesign.headerTemp}
+                    onChange={(e) => setCurrentDesign({...currentDesign, headerTemp: e.target.value})}
+                    className="text-xs font-bold w-full py-2.5 px-3 rounded-xl border border-slate-300 bg-slate-50 text-slate-700 outline-none shadow-sm cursor-pointer mb-1"
+                  >
+                    {[
+                      { val: 'h-classic-left', label: 'Classic Left' },
+                      { val: 'h-solid-block', label: 'Solid Block' },
+                      { val: 'h-dark-mode', label: 'Dark Mode' },
+                      { val: 'h-ultimate-pro', label: 'Ultimate Pro' },
+                      { val: 'h-modern-right', label: 'Modern Right' },
+                      { val: 'h-elegant-line', label: 'Elegant Line' },
+                      { val: 'h-center-focus', label: 'Center Focus' },
+                      { val: 'h-minimal-box', label: 'Minimal Box' },
+                      { val: 'h-bold-brand', label: 'Bold Brand' },
+                      { val: 'h-gradient-fade', label: 'Gradient Fade' },
+                      { val: 'h-corporate-split', label: 'Corporate Split' },
+                      { val: 'h-luxury-accent', label: 'Luxury Accent' },
+                      { val: 'h-tech-neon', label: 'Tech Neon' },
+                      { val: 'h-clean-cut', label: 'Clean Cut' },
+                      { val: 'h-vintage-stamp', label: 'Vintage Stamp' }
+                    ].map((opt, i) => (
+                      <option key={opt.val} value={opt.val}>
+                        Header Design #{i+1} ({opt.label})
+                      </option>
+                    ))}
+                  </select>
+                  
+                  <div className="grid grid-cols-12 gap-1 p-2 bg-slate-50 rounded-xl border border-slate-200 items-center shadow-sm">
+                    <select value={currentDesign.headerFontFam} onChange={(e) => setCurrentDesign({...currentDesign, headerFontFam: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-white truncate">
                       {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
                     </select>
                     <div className="col-span-2 flex items-center gap-0.5 justify-center">
                       <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                      <button type="button" onClick={() => handleDeleteFont(currentDesign.certFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      <button type="button" onClick={() => handleDeleteFont(currentDesign.headerFontFam)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
                     </div>
-                    <input type="number" value={currentDesign.certSize} onChange={(e) => setCurrentDesign({...currentDesign, certSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, certBold: !currentDesign.certBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.certBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, certItalic: !currentDesign.certItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.certItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, certUnderline: !currentDesign.certUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.certUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
-                    <input type="color" value={currentDesign.certColor} onChange={(e) => setCurrentDesign({...currentDesign, certColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    <input type="number" value={currentDesign.headerFontSize} onChange={(e) => setCurrentDesign({...currentDesign, headerFontSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerFontBold: !currentDesign.headerFontBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.headerFontBold ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>B</button>
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerFontItalic: !currentDesign.headerFontItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.headerFontItalic ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>I</button>
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerFontUnderline: !currentDesign.headerFontUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.headerFontUnderline ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>U</button>
+                    <input type="color" value={currentDesign.headerFontColor} onChange={(e) => setCurrentDesign({...currentDesign, headerFontColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" title="Header Color" />
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Header Font Setup</label>
-                  <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
-                    <select value={currentDesign.headerFont} onChange={(e) => setCurrentDesign({...currentDesign, headerFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
+                  <label className="text-[11px] font-black uppercase text-indigo-700 tracking-wider border-b border-slate-100 pb-2">
+                    3. Billing Setup (15 Designs)
+                  </label>
+                  <select 
+                    value={currentDesign.billingTemp}
+                    onChange={(e) => setCurrentDesign({...currentDesign, billingTemp: e.target.value})}
+                    className="text-xs font-bold w-full py-2.5 px-3 rounded-xl border border-slate-300 bg-slate-50 text-slate-700 outline-none shadow-sm cursor-pointer mb-1"
+                  >
+                    {[
+                      { val: 'b-classic-split', label: 'Classic Split' },
+                      { val: 'b-dual-cards', label: 'Dual Cards' },
+                      { val: 'b-solid-right', label: 'Solid Right' },
+                      { val: 'b-grid-compact', label: 'Compact Grid' },
+                      { val: 'b-ultra-premium', label: 'Ultra Premium' },
+                      { val: 'b-minimal-border', label: 'Minimal Border' },
+                      { val: 'b-floating-shadow', label: 'Floating Shadow' },
+                      { val: 'b-accent-left', label: 'Accent Left' },
+                      { val: 'b-boxed-tint', label: 'Boxed Tint' },
+                      { val: 'b-corporate-grey', label: 'Corporate Grey' },
+                      { val: 'b-clean-line', label: 'Clean Line' },
+                      { val: 'b-modern-dark', label: 'Modern Dark' },
+                      { val: 'b-tech-grid', label: 'Tech Grid' },
+                      { val: 'b-elegant-serif', label: 'Elegant Serif' },
+                      { val: 'b-impact-block', label: 'Impact Block' }
+                    ].map((opt, i) => (
+                      <option key={opt.val} value={opt.val}>
+                        Billing Design #{i+1} ({opt.label})
+                      </option>
+                    ))}
+                  </select>
+                  
+                  <div className="grid grid-cols-12 gap-1 p-2 bg-slate-50 rounded-xl border border-slate-200 items-center shadow-sm">
+                    <select value={currentDesign.billingFontFam} onChange={(e) => setCurrentDesign({...currentDesign, billingFontFam: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-white truncate">
                       {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
                     </select>
                     <div className="col-span-2 flex items-center gap-0.5 justify-center">
                       <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                      <button type="button" onClick={() => handleDeleteFont(currentDesign.headerFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      <button type="button" onClick={() => handleDeleteFont(currentDesign.billingFontFam)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
                     </div>
-                    <input type="number" value={currentDesign.headerSize} onChange={(e) => setCurrentDesign({...currentDesign, headerSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerBold: !currentDesign.headerBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.headerBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerItalic: !currentDesign.headerItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.headerItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerUnderline: !currentDesign.headerUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.headerUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
-                    <input type="color" value={currentDesign.headerColor} onChange={(e) => setCurrentDesign({...currentDesign, headerColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    <input type="number" value={currentDesign.billingFontSize} onChange={(e) => setCurrentDesign({...currentDesign, billingFontSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, billingFontBold: !currentDesign.billingFontBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.billingFontBold ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>B</button>
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, billingFontItalic: !currentDesign.billingFontItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.billingFontItalic ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>I</button>
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, billingFontUnderline: !currentDesign.billingFontUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.billingFontUnderline ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>U</button>
+                    <input type="color" value={currentDesign.billingFontColor} onChange={(e) => setCurrentDesign({...currentDesign, billingFontColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" title="Billing Color" />
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Doc Font Setup (Body, Date, Table)</label>
-                  <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
-                    <select value={currentDesign.docFont} onChange={(e) => setCurrentDesign({...currentDesign, docFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
+                  <label className="text-[11px] font-black uppercase text-indigo-700 tracking-wider border-b border-slate-100 pb-2">
+                    4. Table Setup (10 Designs)
+                  </label>
+                  <select 
+                    value={currentDesign.tableTemp}
+                    onChange={(e) => setCurrentDesign({...currentDesign, tableTemp: e.target.value})}
+                    className="text-xs font-bold w-full py-2.5 px-3 rounded-xl border border-slate-300 bg-slate-50 text-slate-700 outline-none shadow-sm cursor-pointer mb-1"
+                  >
+                    {[
+                      { val: 'table-base', label: 'Modern Line Grid' },
+                      { val: 'table-base table-striped', label: 'Zebra Striped' },
+                      { val: 'table-corporate', label: 'Classic Corporate' },
+                      { val: 'table-dark-head', label: 'Dark Header' },
+                      { val: 'table-minimal', label: 'Minimal Box' },
+                      { val: 'table-bordered', label: 'Full Bordered' },
+                      { val: 'table-elegant', label: 'Elegant Serif' },
+                      { val: 'table-accent', label: 'Accent Highlight' },
+                      { val: 'table-compact', label: 'Compact Spacing' },
+                      { val: 'table-spaced', label: 'Wide Spacing' }
+                    ].map((opt, i) => (
+                      <option key={opt.val} value={opt.val}>
+                        Table Design #{i+1} ({opt.label})
+                      </option>
+                    ))}
+                  </select>
+                  
+                  <div className="grid grid-cols-12 gap-1 p-2 bg-slate-50 rounded-xl border border-slate-200 items-center shadow-sm">
+                    <select value={currentDesign.tableFontFam} onChange={(e) => setCurrentDesign({...currentDesign, tableFontFam: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-white truncate">
                       {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
                     </select>
                     <div className="col-span-2 flex items-center gap-0.5 justify-center">
                       <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                      <button type="button" onClick={() => handleDeleteFont(currentDesign.docFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      <button type="button" onClick={() => handleDeleteFont(currentDesign.tableFontFam)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
                     </div>
-                    <input type="number" value={currentDesign.docSize} onChange={(e) => setCurrentDesign({...currentDesign, docSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, docBold: !currentDesign.docBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.docBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, docItalic: !currentDesign.docItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.docItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, docUnderline: !currentDesign.docUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.docUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
-                    <input type="color" value={currentDesign.docColor} onChange={(e) => setCurrentDesign({...currentDesign, docColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    <input type="number" value={currentDesign.tableFontSize} onChange={(e) => setCurrentDesign({...currentDesign, tableFontSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, tableFontBold: !currentDesign.tableFontBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.tableFontBold ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>B</button>
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, tableFontItalic: !currentDesign.tableFontItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.tableFontItalic ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>I</button>
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, tableFontUnderline: !currentDesign.tableFontUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.tableFontUnderline ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>U</button>
+                    <input type="color" value={currentDesign.tableFontColor} onChange={(e) => setCurrentDesign({...currentDesign, tableFontColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" title="Table Color" />
                   </div>
                 </div>
 
-                <div className="flex flex-col gap-1.5">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Cust Font Setup (Customer & Address)</label>
-                  <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 shadow-sm items-center">
-                    <select value={currentDesign.custFont} onChange={(e) => setCurrentDesign({...currentDesign, custFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
+                <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
+                  <label className="text-[11px] font-black uppercase text-indigo-700 tracking-wider border-b border-slate-100 pb-2">
+                    5. Terms & Footer Setup
+                  </label>
+                  <textarea 
+                    value={currentDesign.quoteTermText} 
+                    onChange={(e) => setCurrentDesign({...currentDesign, quoteTermText: e.target.value})}
+                    rows="3"
+                    className="pro-input text-xs w-full bg-slate-50 border-slate-300 rounded-lg shadow-inner resize-none font-medium"
+                    placeholder="Enter terms and conditions..."
+                  ></textarea>
+                  
+                  <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 items-center shadow-sm">
+                    <select value={currentDesign.quoteTermFontFam} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermFontFam: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 truncate">
                       {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
                     </select>
                     <div className="col-span-2 flex items-center gap-0.5 justify-center">
                       <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                      <button type="button" onClick={() => handleDeleteFont(currentDesign.custFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
+                      <button type="button" onClick={() => handleDeleteFont(currentDesign.quoteTermFontFam)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
                     </div>
-                    <input type="number" value={currentDesign.custSize} onChange={(e) => setCurrentDesign({...currentDesign, custSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, custBold: !currentDesign.custBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.custBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, custItalic: !currentDesign.custItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.custItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, custUnderline: !currentDesign.custUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.custUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
-                    <input type="color" value={currentDesign.custColor} onChange={(e) => setCurrentDesign({...currentDesign, custColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
+                    <input type="number" value={currentDesign.quoteTermFontSize} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermFontSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTermFontBold: !currentDesign.quoteTermFontBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.quoteTermFontBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-700'}`}>B</button>
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTermFontItalic: !currentDesign.quoteTermFontItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.quoteTermFontItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-700'}`}>I</button>
+                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTermFontUnderline: !currentDesign.quoteTermFontUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.quoteTermFontUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-700'}`}>U</button>
+                    <input type="color" value={currentDesign.quoteTermFontColor} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermFontColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" title="Text Color" />
+                  </div>
+                  <div className="grid grid-cols-12 gap-2 mt-1 pt-2 border-t border-slate-100 items-center">
+                    <span className="col-span-4 text-[10px] font-bold text-slate-500 uppercase">Position X / Y:</span>
+                    <input type="number" value={currentDesign.quoteTermX} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermX: Number(e.target.value)})} placeholder="X" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
+                    <input type="number" value={currentDesign.quoteTermY} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermY: Number(e.target.value)})} placeholder="Y" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
                   </div>
                 </div>
 
@@ -1153,373 +1353,45 @@ export default function Templates() {
                   </div>
                 </div>
 
-                <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2">
-                  <div className="flex justify-between items-center">
-                    <label className="text-[10px] font-black uppercase text-slate-700">A4 Background</label>
-                    {currentDesign.a4BgUrl && <button onClick={() => setCurrentDesign({...currentDesign, a4BgUrl: ''})} className="text-red-500 font-bold text-xs">Delete</button>}
-                  </div>
-                  <input type="file" accept="image/*" onChange={handleBgFile} className="text-[9px] w-full text-slate-400 cursor-pointer" />
-                  <div>
-                    <label className="block text-[9px] font-bold text-slate-500 uppercase mb-1">Top Margin (px):</label>
-                    <input type="number" value={currentDesign.topMargin} onChange={(e) => setCurrentDesign({...currentDesign, topMargin: Number(e.target.value)})} className="pro-input text-xs py-1 font-mono font-bold text-center" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { name: 'Top Logo', key: 'logo' },
-                    { name: 'Right Ext', key: 'rightExt' },
-                    { name: 'Sub Image', key: 'subImage' },
-                    { name: 'Stamping', key: 'stamp' },
-                    { name: 'ISO Logo', key: 'isoLogo' },
-                    { name: 'GeM Logo', key: 'gemLogo' },
-                    { name: 'MSME', key: 'msme' },
-                    { name: 'Make In India', key: 'makeInIndia' }
-                  ].map((item) => {
-                    const slotData = currentGraphics[item.key] || { url: '', x: 0, y: 0, size: 100 };
-                    return (
-                      <div key={item.key} className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-2">
-                        <div className="flex justify-between items-center">
-                          <label className="text-[9px] font-black uppercase text-slate-700">{item.name}</label>
-                          {slotData.url && <button onClick={() => removeGraphic(item.key)} className="text-red-500 font-bold text-xs hover:underline">✕ Del</button>}
+                <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
+                  <h3 className="font-black text-emerald-800 text-[11px] uppercase border-b border-emerald-200 pb-2">🖼️ Quotation Logo & Stamp Setup</h3>
+                  <div className="grid grid-cols-2 gap-3">
+                    {[
+                      { name: 'Top Logo', key: 'logo' },
+                      { name: 'Stamp', key: 'stamp' }
+                    ].map((item) => {
+                      const slotData = currentGraphics[item.key] || { url: '', x: 0, y: 0, size: 100 };
+                      return (
+                        <div key={item.key} className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-2">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[9px] font-black uppercase text-slate-700">{item.name}</label>
+                            {slotData.url && <button onClick={() => removeGraphic(item.key)} className="text-red-500 font-bold text-xs hover:underline">✕ Del</button>}
+                          </div>
+                          <input type="file" accept="image/*" onChange={(e) => handleGraphicFile(item.key, e.target.files[0])} className="text-[8px] w-full text-slate-400 cursor-pointer" />
+                          <div className="grid grid-cols-3 gap-1">
+                            <input type="number" value={slotData.x} onChange={(e) => updateGraphicProp(item.key, 'x', e.target.value)} placeholder="X" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
+                            <input type="number" value={slotData.y} onChange={(e) => updateGraphicProp(item.key, 'y', e.target.value)} placeholder="Y" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
+                            <input type="number" value={slotData.size} onChange={(e) => updateGraphicProp(item.key, 'size', e.target.value)} placeholder="Size" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
+                          </div>
                         </div>
-                        <input type="file" accept="image/*" onChange={(e) => handleGraphicFile(item.key, e.target.files[0])} className="text-[8px] w-full text-slate-400 cursor-pointer" />
-                        <div className="grid grid-cols-3 gap-1">
-                          <input type="number" value={slotData.x} onChange={(e) => updateGraphicProp(item.key, 'x', e.target.value)} placeholder="X" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
-                          <input type="number" value={slotData.y} onChange={(e) => updateGraphicProp(item.key, 'y', e.target.value)} placeholder="Y" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
-                          <input type="number" value={slotData.size} onChange={(e) => updateGraphicProp(item.key, 'size', e.target.value)} placeholder="Size" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="bg-red-50 p-4 rounded-xl border border-red-200 shadow-sm">
-                <h4 className="font-black text-[11px] text-red-900 uppercase mb-2 border-b border-red-200 pb-2">🔥 Main Categories</h4>
-                <form onSubmit={handleAddCategory} className="flex gap-2 mb-3">
-                  <input 
-                    type="text" 
-                    value={newCategory}
-                    onChange={(e) => setNewCategory(e.target.value)}
-                    className="text-xs py-2 px-3 rounded-xl border border-red-200 bg-white w-full outline-none font-bold" 
-                    placeholder="New Category..." 
-                  />
-                  <button type="submit" className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-xl text-xs font-black uppercase shadow-sm">➕</button>
-                </form>
-                <div className="flex flex-wrap gap-1.5">
-                  {categories.map((cat) => (
-                    <span key={cat} className="bg-white border border-red-200 text-red-800 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm">
-                      {cat} <button type="button" onClick={() => removeCategory(cat)} className="text-red-500 hover:text-red-700 font-black">&times;</button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-blue-50 p-4 rounded-xl border border-blue-200 shadow-sm">
-                <h4 className="font-black text-[11px] text-blue-900 uppercase mb-2 border-b border-blue-200 pb-2">📏 Capacities</h4>
-                <form onSubmit={handleAddCapacity} className="flex gap-2 mb-3">
-                  <input 
-                    type="text" 
-                    value={newCapacity}
-                    onChange={(e) => setNewCapacity(e.target.value)}
-                    className="text-xs py-2 px-3 rounded-xl border border-blue-200 bg-white w-full outline-none font-bold" 
-                    placeholder="New Capacity..." 
-                  />
-                  <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-black uppercase shadow-sm">➕</button>
-                </form>
-                <div className="flex flex-wrap gap-1.5">
-                  {capacities.map((cap) => (
-                    <span key={cap} className="bg-white border border-blue-200 text-blue-800 px-3 py-1 rounded-lg text-xs font-bold flex items-center gap-2 shadow-sm">
-                      {cap} <button type="button" onClick={() => removeCapacity(cap)} className="text-blue-500 hover:text-blue-700 font-black">&times;</button>
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-            </div>
-          )}
-
-          {designMode === 'quotation' && (
-            <div className="flex flex-col gap-4 mt-2 animate-[fadeIn_0.2s_ease-in-out]">
-              
-              <div className="bg-pink-50 border border-pink-200 p-4 rounded-2xl shadow-sm flex flex-col gap-3">
-                <h3 className="font-black text-pink-800 text-[11px] uppercase border-b border-pink-200 pb-2">🎨 1. Global & Title Setup</h3>
-                <div className="flex justify-between items-center bg-white p-2.5 rounded-xl border border-pink-100 shadow-sm">
-                  <label className="text-[10px] font-bold text-slate-600 uppercase ml-1">Theme Color</label>
-                  <input 
-                    type="color" 
-                    value={currentDesign.quoteThemeColor} 
-                    onChange={(e) => setCurrentDesign({...currentDesign, quoteThemeColor: e.target.value})} 
-                    className="w-10 h-8 rounded-lg cursor-pointer border border-slate-300 p-0.5 bg-white shadow-sm" 
-                  />
-                </div>
-                <div className="flex items-center gap-2 bg-white p-2.5 rounded-xl border border-pink-100 shadow-sm">
-                  <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Title Text:</label>
-                  <input 
-                    type="text" 
-                    value={currentDesign.quoteTitle} 
-                    onChange={(e) => setCurrentDesign({...currentDesign, quoteTitle: e.target.value})} 
-                    className="flex-1 text-xs font-black text-slate-800 py-1.5 px-3 border border-slate-300 rounded-lg bg-slate-50 outline-none" 
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5 bg-white p-2.5 rounded-xl border border-pink-100 shadow-sm mt-1">
-                  <label className="block text-[10px] font-bold text-slate-500 uppercase">Title Font & Position Setup</label>
-                  <div className="grid grid-cols-12 gap-1 items-center">
-                    <select value={currentDesign.quoteTitleFont} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
-                      {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
-                    </select>
-                    <div className="col-span-2 flex items-center gap-0.5 justify-center">
-                      <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                      <button type="button" onClick={() => handleDeleteFont(currentDesign.quoteTitleFont)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
-                    </div>
-                    <input type="number" value={currentDesign.quoteTitleSize} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTitleBold: !currentDesign.quoteTitleBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.quoteTitleBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTitleItalic: !currentDesign.quoteTitleItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.quoteTitleItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
-                    <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTitleUnderline: !currentDesign.quoteTitleUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.quoteTitleUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
-                    <input type="color" value={currentDesign.quoteTitleColor} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
-                  </div>
-                  <div className="grid grid-cols-12 gap-2 mt-1 pt-2 border-t border-slate-100 items-center">
-                    <span className="col-span-4 text-[10px] font-bold text-slate-500 uppercase">Position X / Y:</span>
-                    <input type="number" value={currentDesign.quoteTitleX} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleX: Number(e.target.value)})} placeholder="X" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
-                    <input type="number" value={currentDesign.quoteTitleY} onChange={(e) => setCurrentDesign({...currentDesign, quoteTitleY: Number(e.target.value)})} placeholder="Y" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
+                      );
+                    })}
                   </div>
                 </div>
+
               </div>
+            )}
+          </div>
 
-              <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
-                <label className="text-[11px] font-black uppercase text-indigo-700 tracking-wider border-b border-slate-100 pb-2">
-                  2. Header Setup (15 Designs)
-                </label>
-                <select 
-                  value={currentDesign.headerTemp}
-                  onChange={(e) => setCurrentDesign({...currentDesign, headerTemp: e.target.value})}
-                  className="text-xs font-bold w-full py-2.5 px-3 rounded-xl border border-slate-300 bg-slate-50 text-slate-700 outline-none shadow-sm cursor-pointer mb-1"
-                >
-                  {[
-                    { val: 'h-classic-left', label: 'Classic Left' },
-                    { val: 'h-solid-block', label: 'Solid Block' },
-                    { val: 'h-dark-mode', label: 'Dark Mode' },
-                    { val: 'h-ultimate-pro', label: 'Ultimate Pro' },
-                    { val: 'h-modern-right', label: 'Modern Right' },
-                    { val: 'h-elegant-line', label: 'Elegant Line' },
-                    { val: 'h-center-focus', label: 'Center Focus' },
-                    { val: 'h-minimal-box', label: 'Minimal Box' },
-                    { val: 'h-bold-brand', label: 'Bold Brand' },
-                    { val: 'h-gradient-fade', label: 'Gradient Fade' },
-                    { val: 'h-corporate-split', label: 'Corporate Split' },
-                    { val: 'h-luxury-accent', label: 'Luxury Accent' },
-                    { val: 'h-tech-neon', label: 'Tech Neon' },
-                    { val: 'h-clean-cut', label: 'Clean Cut' },
-                    { val: 'h-vintage-stamp', label: 'Vintage Stamp' }
-                  ].map((opt, i) => (
-                    <option key={opt.val} value={opt.val}>
-                      Header Design #{i+1} ({opt.label})
-                    </option>
-                  ))}
-                </select>
-                
-                <div className="grid grid-cols-12 gap-1 p-2 bg-slate-50 rounded-xl border border-slate-200 items-center shadow-sm">
-                  <select value={currentDesign.headerFontFam} onChange={(e) => setCurrentDesign({...currentDesign, headerFontFam: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-white truncate">
-                    {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                  <div className="col-span-2 flex items-center gap-0.5 justify-center">
-                    <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                    <button type="button" onClick={() => handleDeleteFont(currentDesign.headerFontFam)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
-                  </div>
-                  <input type="number" value={currentDesign.headerFontSize} onChange={(e) => setCurrentDesign({...currentDesign, headerFontSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerFontBold: !currentDesign.headerFontBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.headerFontBold ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>B</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerFontItalic: !currentDesign.headerFontItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.headerFontItalic ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>I</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, headerFontUnderline: !currentDesign.headerFontUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.headerFontUnderline ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>U</button>
-                  <input type="color" value={currentDesign.headerFontColor} onChange={(e) => setCurrentDesign({...currentDesign, headerFontColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" title="Header Color" />
-                </div>
+          <div className="hidden lg:flex lg:col-span-7 bg-slate-300 p-6 rounded-2xl shadow-inner border border-slate-400 justify-center items-center overflow-y-auto overflow-x-hidden h-[78vh] w-full custom-scrollbar relative">
+            <div className="m-auto flex justify-center items-center py-10 w-full">
+              <div className="origin-center transform scale-[0.65] xl:scale-[0.75] transition-transform shadow-2xl bg-white">
+                {renderA4Content()}
               </div>
-
-              <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
-                <label className="text-[11px] font-black uppercase text-indigo-700 tracking-wider border-b border-slate-100 pb-2">
-                  3. Billing Setup (15 Designs)
-                </label>
-                <select 
-                  value={currentDesign.billingTemp}
-                  onChange={(e) => setCurrentDesign({...currentDesign, billingTemp: e.target.value})}
-                  className="text-xs font-bold w-full py-2.5 px-3 rounded-xl border border-slate-300 bg-slate-50 text-slate-700 outline-none shadow-sm cursor-pointer mb-1"
-                >
-                  {[
-                    { val: 'b-classic-split', label: 'Classic Split' },
-                    { val: 'b-dual-cards', label: 'Dual Cards' },
-                    { val: 'b-solid-right', label: 'Solid Right' },
-                    { val: 'b-grid-compact', label: 'Compact Grid' },
-                    { val: 'b-ultra-premium', label: 'Ultra Premium' },
-                    { val: 'b-minimal-border', label: 'Minimal Border' },
-                    { val: 'b-floating-shadow', label: 'Floating Shadow' },
-                    { val: 'b-accent-left', label: 'Accent Left' },
-                    { val: 'b-boxed-tint', label: 'Boxed Tint' },
-                    { val: 'b-corporate-grey', label: 'Corporate Grey' },
-                    { val: 'b-clean-line', label: 'Clean Line' },
-                    { val: 'b-modern-dark', label: 'Modern Dark' },
-                    { val: 'b-tech-grid', label: 'Tech Grid' },
-                    { val: 'b-elegant-serif', label: 'Elegant Serif' },
-                    { val: 'b-impact-block', label: 'Impact Block' }
-                  ].map((opt, i) => (
-                    <option key={opt.val} value={opt.val}>
-                      Billing Design #{i+1} ({opt.label})
-                    </option>
-                  ))}
-                </select>
-                
-                <div className="grid grid-cols-12 gap-1 p-2 bg-slate-50 rounded-xl border border-slate-200 items-center shadow-sm">
-                  <select value={currentDesign.billingFontFam} onChange={(e) => setCurrentDesign({...currentDesign, billingFontFam: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-white truncate">
-                    {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                  <div className="col-span-2 flex items-center gap-0.5 justify-center">
-                    <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                    <button type="button" onClick={() => handleDeleteFont(currentDesign.billingFontFam)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
-                  </div>
-                  <input type="number" value={currentDesign.billingFontSize} onChange={(e) => setCurrentDesign({...currentDesign, billingFontSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, billingFontBold: !currentDesign.billingFontBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.billingFontBold ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>B</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, billingFontItalic: !currentDesign.billingFontItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.billingFontItalic ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>I</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, billingFontUnderline: !currentDesign.billingFontUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.billingFontUnderline ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>U</button>
-                  <input type="color" value={currentDesign.billingFontColor} onChange={(e) => setCurrentDesign({...currentDesign, billingFontColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" title="Billing Color" />
-                </div>
-              </div>
-
-              <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
-                <label className="text-[11px] font-black uppercase text-indigo-700 tracking-wider border-b border-slate-100 pb-2">
-                  4. Table Setup (10 Designs)
-                </label>
-                <select 
-                  value={currentDesign.tableTemp}
-                  onChange={(e) => setCurrentDesign({...currentDesign, tableTemp: e.target.value})}
-                  className="text-xs font-bold w-full py-2.5 px-3 rounded-xl border border-slate-300 bg-slate-50 text-slate-700 outline-none shadow-sm cursor-pointer mb-1"
-                >
-                  {[
-                    { val: 'table-base', label: 'Modern Line Grid' },
-                    { val: 'table-base table-striped', label: 'Zebra Striped' },
-                    { val: 'table-corporate', label: 'Classic Corporate' },
-                    { val: 'table-dark-head', label: 'Dark Header' },
-                    { val: 'table-minimal', label: 'Minimal Box' },
-                    { val: 'table-bordered', label: 'Full Bordered' },
-                    { val: 'table-elegant', label: 'Elegant Serif' },
-                    { val: 'table-accent', label: 'Accent Highlight' },
-                    { val: 'table-compact', label: 'Compact Spacing' },
-                    { val: 'table-spaced', label: 'Wide Spacing' }
-                  ].map((opt, i) => (
-                    <option key={opt.val} value={opt.val}>
-                      Table Design #{i+1} ({opt.label})
-                    </option>
-                  ))}
-                </select>
-                
-                <div className="grid grid-cols-12 gap-1 p-2 bg-slate-50 rounded-xl border border-slate-200 items-center shadow-sm">
-                  <select value={currentDesign.tableFontFam} onChange={(e) => setCurrentDesign({...currentDesign, tableFontFam: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-white truncate">
-                    {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                  <div className="col-span-2 flex items-center gap-0.5 justify-center">
-                    <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                    <button type="button" onClick={() => handleDeleteFont(currentDesign.tableFontFam)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
-                  </div>
-                  <input type="number" value={currentDesign.tableFontSize} onChange={(e) => setCurrentDesign({...currentDesign, tableFontSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, tableFontBold: !currentDesign.tableFontBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.tableFontBold ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>B</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, tableFontItalic: !currentDesign.tableFontItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.tableFontItalic ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>I</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, tableFontUnderline: !currentDesign.tableFontUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.tableFontUnderline ? 'bg-slate-800 text-white' : 'bg-white text-slate-700'}`}>U</button>
-                  <input type="color" value={currentDesign.tableFontColor} onChange={(e) => setCurrentDesign({...currentDesign, tableFontColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" title="Table Color" />
-                </div>
-              </div>
-
-              <div className="bg-white border border-slate-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
-                <label className="text-[11px] font-black uppercase text-indigo-700 tracking-wider border-b border-slate-100 pb-2">
-                  5. Terms & Footer Setup
-                </label>
-                <textarea 
-                  value={currentDesign.quoteTermText} 
-                  onChange={(e) => setCurrentDesign({...currentDesign, quoteTermText: e.target.value})}
-                  rows="3"
-                  className="pro-input text-xs w-full bg-slate-50 border-slate-300 rounded-lg shadow-inner resize-none font-medium"
-                  placeholder="Enter terms and conditions..."
-                ></textarea>
-                
-                <div className="grid grid-cols-12 gap-1 p-2 bg-white rounded-xl border border-slate-200 items-center shadow-sm">
-                  <select value={currentDesign.quoteTermFontFam} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermFontFam: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 truncate">
-                    {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                  <div className="col-span-2 flex items-center gap-0.5 justify-center">
-                    <button type="button" onClick={handleAddFont} className="bg-emerald-600 text-white w-5 h-5 rounded text-[10px] font-black">+</button>
-                    <button type="button" onClick={() => handleDeleteFont(currentDesign.quoteTermFontFam)} className="bg-red-500 text-white w-5 h-5 rounded text-[10px] font-black">-</button>
-                  </div>
-                  <input type="number" value={currentDesign.quoteTermFontSize} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermFontSize: Number(e.target.value)})} className="col-span-1 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTermFontBold: !currentDesign.quoteTermFontBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.quoteTermFontBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-700'}`}>B</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTermFontItalic: !currentDesign.quoteTermFontItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.quoteTermFontItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-700'}`}>I</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, quoteTermFontUnderline: !currentDesign.quoteTermFontUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.quoteTermFontUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-700'}`}>U</button>
-                  <input type="color" value={currentDesign.quoteTermFontColor} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermFontColor: e.target.value})} className="col-span-2 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" title="Text Color" />
-                </div>
-                <div className="grid grid-cols-12 gap-2 mt-1 pt-2 border-t border-slate-100 items-center">
-                  <span className="col-span-4 text-[10px] font-bold text-slate-500 uppercase">Position X / Y:</span>
-                  <input type="number" value={currentDesign.quoteTermX} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermX: Number(e.target.value)})} placeholder="X" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
-                  <input type="number" value={currentDesign.quoteTermY} onChange={(e) => setCurrentDesign({...currentDesign, quoteTermY: Number(e.target.value)})} placeholder="Y" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
-                </div>
-              </div>
-
-              <div className="flex flex-col gap-1.5 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-                <label className="block text-[10px] font-bold text-slate-700 uppercase">Signature Setup (Center Aligned)</label>
-                <div className="grid grid-cols-12 gap-1 items-center">
-                  <select value={currentDesign.sigFont} onChange={(e) => setCurrentDesign({...currentDesign, sigFont: e.target.value})} className="col-span-4 text-xs font-bold py-1.5 px-1 rounded-lg border border-slate-200 bg-slate-50 text-slate-700 truncate">
-                    {currentDesign.customFonts.map(f => <option key={f} value={f}>{f}</option>)}
-                  </select>
-                  <input type="number" value={currentDesign.sigSize} onChange={(e) => setCurrentDesign({...currentDesign, sigSize: Number(e.target.value)})} className="col-span-2 text-xs py-1.5 text-center font-mono font-bold rounded-lg border border-slate-200 bg-slate-50" placeholder="Size" />
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, sigBold: !currentDesign.sigBold})} className={`col-span-1 h-8 rounded-lg font-serif font-bold text-xs border ${currentDesign.sigBold ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>B</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, sigItalic: !currentDesign.sigItalic})} className={`col-span-1 h-8 rounded-lg font-serif italic text-xs border ${currentDesign.sigItalic ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>I</button>
-                  <button type="button" onClick={() => setCurrentDesign({...currentDesign, sigUnderline: !currentDesign.sigUnderline})} className={`col-span-1 h-8 rounded-lg font-serif underline text-xs border ${currentDesign.sigUnderline ? 'bg-slate-800 text-white' : 'bg-slate-50 text-slate-600'}`}>U</button>
-                  <input type="color" value={currentDesign.sigColor} onChange={(e) => setCurrentDesign({...currentDesign, sigColor: e.target.value})} className="col-span-3 h-8 w-full p-0.5 border border-slate-300 rounded-lg cursor-pointer bg-white" />
-                </div>
-                <div className="grid grid-cols-12 gap-2 mt-2 pt-2 border-t border-slate-100 items-center">
-                  <span className="col-span-4 text-[10px] font-bold text-slate-500 uppercase">Position X / Y:</span>
-                  <input type="number" value={currentDesign.sigX} onChange={(e) => setCurrentDesign({...currentDesign, sigX: Number(e.target.value)})} placeholder="X" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
-                  <input type="number" value={currentDesign.sigY} onChange={(e) => setCurrentDesign({...currentDesign, sigY: Number(e.target.value)})} placeholder="Y" className="col-span-4 text-xs py-1 text-center font-mono font-bold rounded-lg border border-slate-300 bg-slate-50" />
-                </div>
-              </div>
-
-              <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-2xl shadow-sm flex flex-col gap-2.5">
-                <h3 className="font-black text-emerald-800 text-[11px] uppercase border-b border-emerald-200 pb-2">🖼️ Quotation Logo & Stamp Setup</h3>
-                <div className="grid grid-cols-2 gap-3">
-                  {[
-                    { name: 'Top Logo', key: 'logo' },
-                    { name: 'Stamp', key: 'stamp' }
-                  ].map((item) => {
-                    const slotData = currentGraphics[item.key] || { url: '', x: 0, y: 0, size: 100 };
-                    return (
-                      <div key={item.key} className="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-col gap-2">
-                        <div className="flex justify-between items-center">
-                          <label className="text-[9px] font-black uppercase text-slate-700">{item.name}</label>
-                          {slotData.url && <button onClick={() => removeGraphic(item.key)} className="text-red-500 font-bold text-xs hover:underline">✕ Del</button>}
-                        </div>
-                        <input type="file" accept="image/*" onChange={(e) => handleGraphicFile(item.key, e.target.files[0])} className="text-[8px] w-full text-slate-400 cursor-pointer" />
-                        <div className="grid grid-cols-3 gap-1">
-                          <input type="number" value={slotData.x} onChange={(e) => updateGraphicProp(item.key, 'x', e.target.value)} placeholder="X" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
-                          <input type="number" value={slotData.y} onChange={(e) => updateGraphicProp(item.key, 'y', e.target.value)} placeholder="Y" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
-                          <input type="number" value={slotData.size} onChange={(e) => updateGraphicProp(item.key, 'size', e.target.value)} placeholder="Size" className="text-[10px] border border-slate-200 p-1 text-center rounded font-mono font-bold bg-slate-50" />
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-            </div>
-          )}
-
-        </div>
-
-        <div className="hidden lg:flex lg:col-span-7 bg-slate-300 p-6 rounded-2xl shadow-inner border border-slate-400 justify-center items-center overflow-y-auto overflow-x-hidden h-[78vh] w-full custom-scrollbar relative">
-          <div className="m-auto flex justify-center items-center py-10 w-full">
-            <div className="origin-center transform scale-[0.65] xl:scale-[0.75] transition-transform shadow-2xl bg-white">
-              {renderA4Content()}
             </div>
           </div>
         </div>
-
       </div>
     </div>
-  </div>
   );
 }

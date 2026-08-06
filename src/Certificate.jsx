@@ -125,9 +125,11 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     initCertificates();
 
     const handleDataUpdate = (e) => {
-      if (!e.detail || e.detail.type === 'certificates' || e.detail.type === 'all') {
+      if (!e.detail || e.detail.type === 'certificates' || e.detail.type === 'all' || e.detail.type === 'templates') {
         const saved = SyncManager.getLocalData('ERP_History_v104', []);
         if (isMounted) setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+        const savedTemplates = SyncManager.getLocalData('ERP_FirmTemplates_v104', {});
+        if (savedTemplates) setFirmTemplates(savedTemplates);
       }
     };
     window.addEventListener('ERP_DATA_UPDATED', handleDataUpdate);
@@ -391,7 +393,9 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
   const activeFirmObj = firms.find(f => f.id === formData.activeFirmId) || { name: 'COMPANY ENTERPRISE', address: 'Address', contact: '' };
   
-  const currentDesign = firmTemplates[formData.activeFirmId] || {
+  // 🟢 ROBUST FIRM-WISE DESIGN RESOLUTION FOR CERTIFICATE
+  const templateKey = `${formData.activeFirmId}_certificate`;
+  const currentDesign = firmTemplates[templateKey] || firmTemplates[formData.activeFirmId] || {
     themeColor: '#00a67e', certPos: 'left-vert', certPosX: 0, certPosY: 0, certFont: 'Georgia', certSize: 42, certColor: '#dc2626', certBold: true, certItalic: false, certUnderline: false,
     headerFont: 'Arial', headerSize: 36, headerColor: '#0f172a', headerBold: true, headerItalic: false, headerUnderline: false,
     docFont: 'Georgia', docSize: 15.5, docColor: '#000000', docBold: false, docItalic: true, docUnderline: false,
@@ -940,7 +944,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
     return matchesSearch && matchesFirm && matchesStatus && matchesFY && matchesMonth && matchesYearNum;
   }).sort((a, b) => {
-    // 🟢 Robust Numerical & Field Extractor for Sorting
     if (sortConfig.key === 'ref') {
       const getNum = (str) => {
         const match = String(str || '').match(/(\d+)(?!.*\d)/);
@@ -1001,16 +1004,17 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   }
 
   if (isPreviewOpen && activePreviewCert) {
-     const dFirmObj = firms.find(f => f.name === activePreviewCert.vendor) || firms[0] || {};
+     const dFirmObj = firms.find(f => f.name.toLowerCase() === (activePreviewCert.vendor || '').toLowerCase()) || firms[0] || {};
      
-     // 🟢 Robust Template Matching (Match by ID or Name to prevent template mismatch)
+     // 🟢 BULLETPROOF DESIGN RESOLUTION FOR DRAWER VIEWER
      let dDesign = currentDesign;
-     if (dFirmObj.id && firmTemplates[dFirmObj.id]) {
+     if (dFirmObj.id && firmTemplates[dFirmObj.id + '_certificate']) {
+       dDesign = firmTemplates[dFirmObj.id + '_certificate'];
+     } else if (dFirmObj.id && firmTemplates[dFirmObj.id]) {
        dDesign = firmTemplates[dFirmObj.id];
      } else if (activePreviewCert.vendor) {
-       const matchedFirmEntry = Object.entries(firmTemplates).find(([firmId]) => {
-         const foundFirm = firms.find(f => f.id === firmId);
-         return foundFirm && foundFirm.name.toLowerCase() === activePreviewCert.vendor.toLowerCase();
+       const matchedFirmEntry = Object.entries(firmTemplates).find(([key, val]) => {
+         return key.toLowerCase().includes(activePreviewCert.vendor.toLowerCase());
        });
        if (matchedFirmEntry) {
          dDesign = matchedFirmEntry[1];
@@ -1855,7 +1859,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                           </button>
                         )}
                         <button onClick={(e) => handleViewCertificate(e, c)} className="flex-1 bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-600 py-2 px-1 rounded-lg text-[10px] font-black uppercase border border-slate-200 transition-colors text-center flex items-center justify-center gap-1">
-                          <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/></svg>
+                          <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24"><path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3 z"/></svg>
                           View
                         </button>
                         <button onClick={(e) => handleEditCertificate(e, c)} className="flex-1 bg-slate-100 hover:bg-orange-50 text-slate-700 hover:text-orange-600 py-2 px-1 rounded-lg text-[10px] font-black uppercase border border-slate-200 transition-colors text-center flex items-center justify-center gap-1">

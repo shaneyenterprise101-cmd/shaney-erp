@@ -3,7 +3,6 @@ import * as XLSX from 'xlsx';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
-// 🟢 Universal Logging Helper for Admin & Staff Actions via Render Backend
 const logActionToBackend = async (actionText) => {
   try {
     const role = localStorage.getItem("ERP_Active_Role") || "ADMIN";
@@ -34,7 +33,7 @@ const logActionToBackend = async (actionText) => {
 export default function Product() {
   const [firms, setFirms] = useState(() => {
     const saved = localStorage.getItem('ERP_Companies_v104');
-    return saved ? JSON.parse(saved).filter(f => f.type === 'certificate') : [];
+    return saved ? JSON.parse(saved).filter(f => f.type === 'quotation') : [];
   });
 
   const [products, setProducts] = useState(() => {
@@ -43,15 +42,18 @@ export default function Product() {
     return initialProd.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
   });
 
-  // 🟢 REAL-TIME LIVE SYNC LISTENER (App.jsx broadcast catcher)
   useEffect(() => {
     const handleDataUpdate = (e) => {
-      if (!e.detail || e.detail.type === 'products') {
+      if (!e.detail || e.detail.type === 'products' || e.detail.type === 'settings') {
         const saved = localStorage.getItem('ERP_Products_v104');
         if (saved) {
           let parsedData = JSON.parse(saved);
           parsedData = parsedData.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
           setProducts(parsedData);
+        }
+        const savedFirms = localStorage.getItem('ERP_Companies_v104');
+        if (savedFirms) {
+          setFirms(JSON.parse(savedFirms).filter(f => f.type === 'quotation'));
         }
       }
     };
@@ -59,7 +61,6 @@ export default function Product() {
     return () => window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
   }, []);
 
-  // 🟢 Fetch products from AWS Cloud on load
   useEffect(() => {
     const fetchCloudProducts = async () => {
       try {
@@ -94,15 +95,10 @@ export default function Product() {
 
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedProductIds, setSelectedProductIds] = useState([]);
-
-  // Pagination State
   const [currentPage, setCurrentPage] = useState(1);
-  const rowsPerPage = 10; // 🟢 Set to 10 rows per page
-
-  // Mobile Floating Search State
+  const rowsPerPage = 10;
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
 
-  // Form states
   const [description, setDescription] = useState('');
   const [hsn, setHsn] = useState('8424');
   const [rates, setRates] = useState({});
@@ -119,6 +115,14 @@ export default function Product() {
       return;
     }
 
+    // 🟢 CLEAN RATES: Save only by firm ID to avoid duplication
+    let cleanRates = {};
+    firms.forEach(f => {
+      if (rates[f.id] !== undefined && rates[f.id] !== '' && rates[f.id] !== null) {
+        cleanRates[f.id] = rates[f.id];
+      }
+    });
+
     const currentTimestamp = Date.now();
     let prodObj = null;
 
@@ -128,8 +132,8 @@ export default function Product() {
         docType: 'product',
         description: description.trim(),
         hsn: hsn.trim(),
-        rates,
-        updatedAt: currentTimestamp // 🟢 Timestamp update
+        rates: cleanRates,
+        updatedAt: currentTimestamp
       };
       const updated = products.map(p => p.id === editingProductId ? prodObj : p);
       setProducts(updated);
@@ -143,8 +147,8 @@ export default function Product() {
         docType: 'product',
         description: description.trim(),
         hsn: hsn.trim(),
-        rates,
-        updatedAt: currentTimestamp // 🟢 Timestamp create
+        rates: cleanRates,
+        updatedAt: currentTimestamp
       };
       const updated = [...products, prodObj];
       setProducts(updated);
@@ -153,7 +157,6 @@ export default function Product() {
       alert('✅ Item Saved Successfully!');
     }
 
-    // 🟢 Save to AWS Cloud & SQLite IPC
     try {
       if (prodObj) {
         await fetch(`${BACKEND_URL}/api/data`, {
@@ -231,7 +234,6 @@ export default function Product() {
     return matchesSearch;
   }).reverse();
 
-  // Pagination Logic
   const totalPages = Math.ceil(filteredProducts.length / rowsPerPage) || 1;
   const paginatedProducts = filteredProducts.slice((currentPage - 1) * rowsPerPage, currentPage * rowsPerPage);
 
@@ -248,7 +250,6 @@ export default function Product() {
       <div className="max-w-7xl mx-auto pb-10">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           
-          {/* LEFT FORM PANEL */}
           <div className="lg:col-span-4 w-full bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
             <h3 className="font-black text-slate-800 text-sm uppercase mb-6 flex items-center gap-2">
               <svg className="w-4 h-4 fill-current text-blue-600" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
@@ -287,7 +288,7 @@ export default function Product() {
                       <span className="text-[10px] font-bold text-slate-600 truncate mb-1">{f.name}</span>
                       <input 
                         type="number" 
-                        value={rates[f.id] || ''} 
+                        value={rates[f.id] !== undefined ? rates[f.id] : ''} 
                         onChange={e => handleRateChange(f.id, e.target.value)} 
                         className="pro-input font-mono bg-white font-bold text-xs" 
                         placeholder="0.00" 
@@ -295,7 +296,7 @@ export default function Product() {
                     </div>
                   ))}
                   {firms.length === 0 && (
-                    <p className="text-[11px] text-red-500 font-bold text-center py-2">Koi Certificate firm nahi mili! Pehle Settings mein Certificate Firm banayein.</p>
+                    <p className="text-[11px] text-red-500 font-bold text-center py-2">Koi Quotation firm nahi mili!</p>
                   )}
                 </div>
               </div>
@@ -314,9 +315,7 @@ export default function Product() {
             </form>
           </div>
 
-          {/* RIGHT INVENTORY CARD LIST PANEL */}
           <div className="lg:col-span-8 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col relative">
-            
             <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center flex-wrap gap-3 relative">
               <div className="flex items-center gap-3">
                 <input 
@@ -331,7 +330,6 @@ export default function Product() {
               </div>
 
               <div className="flex items-center gap-2 flex-wrap justify-end">
-                {/* Desktop Search */}
                 <div className="hidden sm:block relative">
                   <input 
                     type="text" 
@@ -343,17 +341,8 @@ export default function Product() {
                   <svg className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
                 </div>
 
-                {/* Mobile Search Button */}
                 <button type="button" onClick={() => setIsMobileSearchOpen(true)} className="sm:hidden bg-slate-100 hover:bg-slate-200 text-slate-700 p-2 rounded-xl shadow-sm cursor-pointer flex items-center justify-center">
                   <svg className="w-4 h-4 text-slate-600" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                </button>
-
-                <button className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-2 rounded-lg text-xs font-bold uppercase transition-all shadow-sm flex items-center gap-1.5 cursor-pointer">
-                  <svg className="w-3.5 h-3.5 fill-current text-blue-600" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg> IMPORT
-                </button>
-
-                <button className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 px-3 py-2 rounded-lg text-xs font-bold uppercase transition-all shadow-sm flex items-center gap-1.5 cursor-pointer">
-                  <svg className="w-3.5 h-3.5 fill-current text-orange-500" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg> Sample
                 </button>
 
                 {selectedProductIds.length > 0 && (
@@ -362,27 +351,8 @@ export default function Product() {
                   </button>
                 )}
               </div>
-
-              {/* Mobile Floating Full-Width Search Bar Overlay */}
-              {isMobileSearchOpen && (
-                <div className="absolute inset-0 bg-white px-3 flex items-center gap-3 z-50 sm:hidden shadow-sm w-full h-full">
-                  <div className="relative flex-1">
-                    <input 
-                      type="text" 
-                      autoFocus 
-                      value={searchTerm} 
-                      onChange={(e) => setSearchTerm(e.target.value)} 
-                      placeholder="Search Items..." 
-                      className="w-full bg-slate-50 font-medium pl-3 pr-9 text-xs py-2 rounded-lg border border-slate-300 outline-none" 
-                    />
-                    <svg className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
-                  </div>
-                  <button type="button" onClick={() => setIsMobileSearchOpen(false)} className="text-slate-500 font-black text-2xl px-2 leading-none cursor-pointer">&times;</button>
-                </div>
-              )}
             </div>
 
-            {/* Pagination & Count Header Tools */}
             <div className="flex flex-col sm:flex-row justify-between items-center py-2.5 px-4 bg-slate-50 border-b border-slate-200 gap-2 shrink-0">
               <span className="text-[10px] font-black uppercase text-slate-600 tracking-wider">
                 Total <span className="font-mono text-indigo-600">{filteredProducts.length}</span> Items Found
@@ -394,7 +364,6 @@ export default function Product() {
               </div>
             </div>
 
-            {/* CARD LIST CONTAINER */}
             <div className="p-4 flex flex-col gap-3 bg-slate-50/50 min-h-[300px] flex-1">
               {paginatedProducts.map((p) => (
                 <div key={p.id} className="flex items-center justify-between p-4 bg-white border border-slate-200 rounded-2xl shadow-sm hover:border-slate-300 transition-all gap-4">
@@ -414,9 +383,10 @@ export default function Product() {
                         <span className="inline-block bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-mono font-bold px-2 py-0.5 rounded-md">
                           HSN: {p.hsn || '8424'}
                         </span>
-                        {Object.entries(p.rates || {}).map(([fId, r]) => {
-                          const fObj = firms.find(x => x.id === fId);
-                          return r ? <span key={fId} className="inline-block bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-[10px] font-bold">₹{r} ({fObj ? fObj.name : 'Firm'})</span> : null;
+                        {Object.entries(p.rates || {}).map(([fKey, r]) => {
+                          const fObj = firms.find(x => x.id === fKey);
+                          if (!fObj) return null; // Only show badge if valid firm ID exists
+                          return r ? <span key={fKey} className="inline-block bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-[10px] font-bold">₹{r} ({fObj.name})</span> : null;
                         })}
                       </div>
                     </div>
@@ -439,15 +409,6 @@ export default function Product() {
                 </div>
               )}
             </div>
-
-            {/* Mobile Pagination Footer */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between bg-white p-3 border-t border-slate-200 shadow-sm sm:hidden shrink-0">
-                <button type="button" onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))} disabled={currentPage === 1} className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 font-bold text-xs px-3 py-1.5 rounded-lg border border-slate-300 cursor-pointer">Previous</button>
-                <span className="text-xs font-black text-slate-700 uppercase tracking-wider">Page {currentPage} of {totalPages}</span>
-                <button type="button" onClick={() => setCurrentPage(prev => Math.min(totalPages, currentPage + 1))} disabled={currentPage === totalPages} className="bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 font-bold text-xs px-3 py-1.5 rounded-lg border border-slate-300 cursor-pointer">Next</button>
-              </div>
-            )}
 
           </div>
 
