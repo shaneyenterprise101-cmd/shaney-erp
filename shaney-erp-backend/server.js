@@ -204,19 +204,14 @@ app.get('/api/document/:id', async (req, res) => {
     }
 });
 
-// 🟢 Exact-Match Professional A4 Preview Route for WhatsApp Links (With Background, Logos, Stamp & Clean Rows)
+// 🟢 Pixel-Perfect Exact A4 Certificate Preview Route for WhatsApp Links
 app.get('/preview/:id', async (req, res) => {
     try {
         const docId = req.params.id;
         const scanResult = await dynamo.send(new ScanCommand({ TableName: TABLE_NAME }));
         
         let foundDoc = null;
-        let firmTemplates = {};
-        let firmsList = [];
-
         scanResult.Items.forEach(item => {
-            if (item.id === 'ERP_FirmTemplates_v104') firmTemplates = item.data || {};
-            if (item.id === 'ERP_Companies_v104') firmsList = item.data || [];
             if (item.data && Array.isArray(item.data)) {
                 const match = item.data.find(i => String(i.id) === String(docId));
                 if (match) foundDoc = match;
@@ -234,13 +229,6 @@ app.get('/preview/:id', async (req, res) => {
                 </html>
             `);
         }
-
-        const matchedFirm = firmsList.find(f => String(f.name).toLowerCase() === String(foundDoc.vendor).toLowerCase()) || firmsList[0] || {};
-        const templateKey = `${matchedFirm.id}_certificate`;
-        const design = firmTemplates[templateKey] || firmTemplates[matchedFirm.id] || {
-            themeColor: '#00a67e', certPos: 'left-vert', certPosX: 0, certPosY: 0, certFont: 'Georgia', certSize: 42, certColor: '#dc2626',
-            a4BgUrl: '', graphics: {}
-        };
 
         const isCert = foundDoc.docType === 'certificate' || foundDoc.ref;
         const items = foundDoc.itemsData ? JSON.parse(foundDoc.itemsData) : null;
@@ -264,134 +252,149 @@ app.get('/preview/:id', async (req, res) => {
                 });
             }
 
-            const bgImageHTML = design.a4BgUrl ? `<img src="${design.a4BgUrl}" style="position:absolute; left:0; top:0; width:100%; height:100%; object-fit:cover; z-index:1; pointer-events:none;" />` : '';
-            
-            let graphicsHTML = '';
-            if (design.graphics) {
-                Object.entries(design.graphics).forEach(([k, g]) => {
-                    if (g && g.url) {
-                        graphicsHTML += `<img src="${g.url}" style="position:absolute; left:${20 + (g.x || 0)}px; top:${20 + (g.y || 0)}px; width:${g.size || 80}px; z-index:40; object-fit:contain; pointer-events:none;" />`;
-                    }
-                });
-            }
-
             return res.send(`
                 <!DOCTYPE html>
                 <html>
                 <head>
-                    <title>Certificate - ${foundDoc.vendor}</title>
+                    <title>Certificate - ${foundDoc.vendor || 'Shaney Enterprise'}</title>
                     <meta name="viewport" content="width=device-width, initial-scale=1.0">
                     <style>
                         body { background: #cbd5e1; margin: 0; padding: 20px; display: flex; justify-content: center; font-family: 'Georgia', serif; }
-                        .a4-page { background: #ffffff; width: 794px; min-height: 1123px; padding: 40px; box-sizing: border-box; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden; }
-                        .content-row { display: flex; flex-direction: row; height: 100%; flex-grow: 1; position: relative; z-index: 10; }
-                        .cert-sidebar { width: 70px; min-width: 70px; display: flex; flex-direction: column; align-items: center; padding-top: 80px; }
-                        .cert-char { font-size: 42px; font-weight: 900; color: #dc2626; margin-bottom: 8px; line-height: 1; font-family: 'Georgia', serif; }
-                        .main-body { flex-grow: 1; display: flex; flex-direction: column; padding-left: 10px; z-index: 20; }
-                        .header-box { display: flex; justify-content: space-between; align-items: center; border-bottom: 3px solid ${design.themeColor || '#00a67e'}; padding-bottom: 15px; margin-bottom: 25px; margin-top: 20px; }
-                        .firm-title { font-size: 32px; font-weight: 900; text-transform: uppercase; font-family: 'Arial', sans-serif; color: #0f172a; margin: 0; line-height: 1; }
-                        .firm-sub { font-size: 14px; font-weight: 900; color: #dc2626; margin-top: 6px; letter-spacing: 0.05em; }
-                        .meta-box { text-align: right; font-size: 14px; font-family: 'Georgia', serif; }
-                        .party-box { margin-bottom: 25px; font-size: 15.5px; line-height: 1.6; }
-                        .party-val { font-family: 'Georgia', serif; font-size: 18px; font-weight: bold; text-transform: uppercase; margin-left: 10px; }
-                        .cert-text { text-align: center; font-size: 15.5px; line-height: 1.6; margin-bottom: 25px; font-style: italic; }
-                        .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-bottom: 30px; background: transparent; }
-                        .cert-table th { padding: 6px; text-align: center; border: 1px solid #000; font-size: 13px; font-weight: bold; background: transparent; }
-                        .cert-table td { padding: 6px; text-align: center; border: 1px solid #000; font-size: 12px; background: transparent; }
-                        .footer-box { margin-top: auto; padding-top: 20px; border-top: 2px solid ${design.themeColor || '#00a67e'}; display: flex; justify-content: space-between; align-items: flex-end; }
-                        .badges-row { display: flex; gap: 15px; align-items: center; font-size: 10px; font-weight: bold; color: #0369a1; margin-bottom: 6px; }
-                        .footer-addr { font-size: 10px; font-family: monospace; color: #64748b; line-height: 1.4; }
-                        .sign-box { text-align: center; min-width: 220px; font-family: 'Arial', sans-serif; }
-                        .sign-title { font-size: 14px; font-weight: bold; }
-                        .sign-space { height: 45px; }
+                        .a4-page { background: #ffffff; width: 794px; min-height: 1123px; padding: 35px 40px; box-sizing: border-box; position: relative; box-shadow: 0 15px 35px rgba(0,0,0,0.2); display: flex; flex-direction: column; overflow: hidden; }
+                        
+                        /* Top & Bottom Decorative Curves */
+                        .top-curve { position: absolute; top: 0; left: 0; width: 100%; height: 75px; background: linear-gradient(135deg, #f97316 0%, #ea580c 50%, #dc2626 100%); clip-path: ellipse(75% 100% at 50% 0%); z-index: 1; }
+                        .bottom-curve { position: absolute; bottom: 0; left: 0; width: 100%H; height: 35px; background: linear-gradient(135deg, #dc2626 0%, #ea580c 50%, #f97316 100%); z-index: 1; }
+
+                        .content-wrapper { position: relative; z-index: 10; display: flex; flex-direction: column; flex-grow: 1; }
+                        .content-row { display: flex; flex-direction: row; flex-grow: 1; }
+                        
+                        .cert-sidebar { width: 55px; min-width: 55px; display: flex; flex-direction: column; align-items: center; padding-top: 40px; }
+                        .cert-char { font-size: 38px; font-weight: 900; color: #dc2626; margin-bottom: 4px; line-height: 1; font-family: 'Georgia', serif; }
+                        
+                        .main-body { flex-grow: 1; display: flex; flex-direction: column; padding-left: 10px; }
+                        
+                        .header-box { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 3px solid #00a67e; padding-bottom: 12px; margin-bottom: 20px; margin-top: 25px; }
+                        .firm-title { font-size: 30px; font-weight: 900; text-transform: uppercase; font-family: 'Arial', sans-serif; color: #0f172a; margin: 0; line-height: 1; }
+                        .firm-sub { font-size: 13px; font-weight: 900; color: #dc2626; margin-top: 5px; letter-spacing: 0.05em; }
+                        .meta-box { text-align: right; font-size: 13.5px; font-family: 'Georgia', serif; }
+                        
+                        .party-box { margin-bottom: 20px; font-size: 15px; line-height: 1.5; }
+                        .party-val { font-family: 'Georgia', serif; font-size: 17px; font-weight: bold; text-transform: uppercase; margin-left: 8px; }
+                        
+                        .cert-text { text-align: center; font-size: 14.5px; line-height: 1.5; margin-bottom: 20px; font-style: italic; }
+                        
+                        .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-bottom: 20px; }
+                        .cert-table th { padding: 5px; text-align: center; border: 1px solid #000; font-size: 12px; font-weight: bold; background: #f8fafc; }
+                        .cert-table td { padding: 5px; text-align: center; border: 1px solid #000; font-size: 11.5px; }
+                        
+                        .footer-box { margin-top: auto; padding-top: 15px; padding-bottom: 20px; border-top: 2px solid #00a67e; display: flex; justify-content: space-between; align-items: flex-end; }
+                        .badges-row { display: flex; gap: 10px; align-items: center; font-size: 9.5px; font-weight: bold; color: #0369a1; margin-bottom: 5px; }
+                        .footer-addr { font-size: 9.5px; font-family: monospace; color: #64748b; line-height: 1.3; }
+                        
+                        .sign-box { text-align: center; min-width: 200px; font-family: 'Arial', sans-serif; position: relative; }
+                        .sign-title { font-size: 13px; font-weight: bold; }
+                        .stamp-img { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%) rotate(-8deg); width: 110px; opacity: 0.85; pointer-events: none; }
+                        .sign-space { height: 50px; }
                     </style>
                 </head>
                 <body>
                     <div class="a4-page">
-                        ${bgImageHTML}
-                        ${graphicsHTML}
-                        <div class="content-row">
-                            <div class="cert-sidebar">
-                                <div class="cert-char">C</div>
-                                <div class="cert-char">E</div>
-                                <div class="cert-char">R</div>
-                                <div class="cert-char">T</div>
-                                <div class="cert-char">I</div>
-                                <div class="cert-char">F</div>
-                                <div class="cert-char">I</div>
-                                <div class="cert-char">C</div>
-                                <div class="cert-char">A</div>
-                                <div class="cert-char">T</div>
-                                <div class="cert-char">E</div>
-                            </div>
-                            <div class="main-body">
-                                <div class="header-box">
-                                    <div>
-                                        <h1 class="firm-title">${foundDoc.vendor || 'COMPANY ENTERPRISE'}</h1>
-                                        <div class="firm-sub">Fire And Safety</div>
-                                    </div>
-                                    <div class="meta-box">
-                                        <div>Date :- <span>${foundDoc.date || 'DD-MM-YYYY'}</span></div>
-                                        <div style="margin-top: 4px;">SR.No :- <span>${foundDoc.ref || '-----'}</span></div>
-                                    </div>
+                        <div class="top-curve"></div>
+                        <div class="bottom-curve"></div>
+                        
+                        <div class="content-wrapper">
+                            <div class="content-row">
+                                <div class="cert-sidebar">
+                                    <div class="cert-char">C</div>
+                                    <div class="cert-char">E</div>
+                                    <div class="cert-char">R</div>
+                                    <div class="cert-char">T</div>
+                                    <div class="cert-char">I</div>
+                                    <div class="cert-char">F</div>
+                                    <div class="cert-char">I</div>
+                                    <div class="cert-char">C</div>
+                                    <div class="cert-char">A</div>
+                                    <div class="cert-char">T</div>
+                                    <div class="cert-char">E</div>
                                 </div>
-
-                                <div class="party-box">
-                                    <div>Certified M/s:- <span class="party-val">${foundDoc.party || 'CUSTOMER NAME'}</span></div>
-                                    <div style="margin-top: 8px;">Address :- <span class="party-val">Address</span></div>
-                                </div>
-
-                                <div class="cert-text">
-                                    <div>We certify that the fire extinguishers mentioned below</div>
-                                    <div>Are tested and refilled as per the relevant Indian standard.</div>
-                                    <div style="margin-top: 6px;">This extinguishers are refilled on Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.date || 'DD-MM-YYYY'}</span></div>
-                                    <div>And Warranty will stand valid up to Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.validDate || 'DD-MM-YYYY'}</span></div>
-                                    <div>Provided the seal is unbroken and in satisfactory condition.</div>
-                                </div>
-
-                                <table class="cert-table">
-                                    <thead>
-                                        <tr>
-                                            <th style="width: 45%;">Extinguisher Type</th>
-                                            <th style="width: 30%;">Capacity</th>
-                                            <th style="width: 25%;">Qty</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        <tr>
-                                            <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Hy. Test</td>
-                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.hyTest || 'Pass'}</td>
-                                        </tr>
-                                        <tr>
-                                            <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Parts</td>
-                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.parts || 'COMPLETE'}</td>
-                                        </tr>
-                                        <tr>
-                                            <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Remark</td>
-                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.remark || 'OK'}</td>
-                                        </tr>
-                                        ${tableRowsHTML}
-                                    </tbody>
-                                </table>
-
-                                <div class="footer-box">
-                                    <div>
-                                        <div class="badges-row">
-                                            <span>🛡️ ISO CERTIFIED</span>
-                                            <span>⭐ GeM SELLER</span>
-                                            <span>🏛️ MSME REGD.</span>
-                                            <span>🇮🇳 MAKE IN INDIA</span>
+                                <div class="main-body">
+                                    <div class="header-box">
+                                        <div>
+                                            <h1 class="firm-title">${foundDoc.vendor || 'SHANEY ENTERPRISE'}</h1>
+                                            <div class="firm-sub">Fire And Safety</div>
                                         </div>
-                                        <div class="footer-addr">
-                                            <div>112, Royal Plaza, Near Sai baba Temple, Zanzarda Road, Junagadh-362001.</div>
-                                            <div>+91 97263 50101 | +91 97264 50101</div>
-                                            <div>shaneyenterprise101@gmail.com</div>
+                                        <div class="meta-box">
+                                            <div>Date :- <span>${foundDoc.date || 'DD-MM-YYYY'}</span></div>
+                                            <div style="margin-top: 3px;">SR.No :- <span>${foundDoc.ref || '-----'}</span></div>
                                         </div>
                                     </div>
-                                    <div class="sign-box">
-                                        <div class="sign-title" style="font-style:italic;">For ${foundDoc.vendor || 'COMPANY ENTERPRISE'}</div>
-                                        <div class="sign-space"></div>
-                                        <div class="sign-title">Authorised Signature</div>
+
+                                    <div class="party-box">
+                                        <div>Certified M/s:- <span class="party-val">${foundDoc.party || 'CUSTOMER NAME'}</span></div>
+                                        <div style="margin-top: 6px;">Address :- <span class="party-val">ADDRESS</span></div>
+                                    </div>
+
+                                    <div class="cert-text">
+                                        <div>We certify that the fire extinguishers mentioned below</div>
+                                        <div>Are tested and refilled as per the relevant Indian standard.</div>
+                                        <div style="margin-top: 5px;">This extinguishers are refilled on Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.date || 'DD-MM-YYYY'}</span></div>
+                                        <div>And Warranty will stand valid up to Date :- <span style="color:#dc2626; font-family:monospace;">${foundDoc.validDate || 'DD-MM-YYYY'}</span></div>
+                                        <div>Provided the seal is unbroken and in satisfactory condition.</div>
+                                    </div>
+
+                                    <table class="cert-table">
+                                        <thead>
+                                            <tr>
+                                                <th style="width: 45%;">Extinguisher Type</th>
+                                                <th style="width: 30%;">Capacity</th>
+                                                <th style="width: 25%;">Qty</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <tr>
+                                                <td style="text-align:left; padding:5px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Hy. Test</td>
+                                                <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.hyTest || 'OK'}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="text-align:left; padding:5px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Parts</td>
+                                                <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.parts || 'OK'}</td>
+                                            </tr>
+                                            <tr>
+                                                <td style="text-align:left; padding:5px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Remark</td>
+                                                <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.remark || 'OK'}</td>
+                                            </tr>
+                                            ${tableRowsHTML}
+                                        </tbody>
+                                    </table>
+
+                                    <div class="footer-box">
+                                        <div>
+                                            <div class="badges-row">
+                                                <span>🛡️ ISO CERTIFIED</span>
+                                                <span>⭐ GeM SELLER</span>
+                                                <span>🏛️ MSME REGD.</span>
+                                                <span>🇮🇳 MAKE IN INDIA</span>
+                                            </div>
+                                            <div class="footer-addr">
+                                                <div>112, Royal Plaza, Near Sai baba Temple, Zanzarda Road, Junagadh-362001.</div>
+                                                <div>+91 97263 50101 | +91 97264 50101</div>
+                                                <div>shaneyenterprise101@gmail.com</div>
+                                            </div>
+                                        </div>
+                                        <div class="sign-box">
+                                            <div class="sign-title">For ${foundDoc.vendor || 'Shaney Enterprise'}</div>
+                                            <!-- Official Round Purple Stamp Simulation -->
+                                            <svg class="stamp-img" viewBox="0 0 120 120">
+                                                <circle cx="60" cy="60" r="54" fill="none" stroke="#6b21a8" stroke-width="2.5" stroke-dasharray="4,2"/>
+                                                <circle cx="60" cy="60" r="44" fill="none" stroke="#6b21a8" stroke-width="1.5"/>
+                                                <text x="60" y="32" font-size="9" font-weight="bold" fill="#6b21a8" text-anchor="middle" font-family="Arial">SHANEY ENTERPRISE</text>
+                                                <text x="60" y="82" font-size="8" font-weight="bold" fill="#6b21a8" text-anchor="middle" font-family="Arial">JUNAGADH</text>
+                                                <text x="60" y="62" font-size="14" font-weight="bold" fill="#6b21a8" text-anchor="middle" font-family="Georgia" font-style="italic">Navnit</text>
+                                            </svg>
+                                            <div class="sign-space"></div>
+                                            <div class="sign-title">Authorised Signature</div>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
@@ -401,7 +404,7 @@ app.get('/preview/:id', async (req, res) => {
                 </html>
             `);
         } else {
-            // --- QUOTATION A4 EXACT HTML RENDERER ---
+            // --- QUOTATION RENDERER ---
             const quoteItems = items && Array.isArray(items) ? items : [];
             const gross = quoteItems.reduce((s, i) => s + (Number(i.amount) || 0), 0);
             const gstRate = quoteItems.length > 0 && quoteItems[0].gst !== undefined ? Number(quoteItems[0].gst) : 18;
@@ -440,7 +443,8 @@ app.get('/preview/:id', async (req, res) => {
                         .totals-box { width: 320px; margin-left: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; border-top: 2px solid #cbd5e1; padding-top: 15px; }
                         .total-row { display: flex; justify-content: space-between; font-weight: bold; color: #475569; }
                         .grand-total { display: flex; justify-content: space-between; font-size: 18px; font-weight: 900; color: #0f172a; background: #f1f5f9; padding: 10px; border-radius: 6px; font-family: monospace; }
-                        .footer-box { margin-top: auto; padding-top: 30px; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #e2e8f0; }
+                        .footer-box { margin-top: auto; padding-top: 30px; display: flex; justify-content: space-between; align-items: flex-end; border-top: 1px solid #e2e8f0; position: relative; }
+                        .stamp-img { position: absolute; bottom: 25px; left: 65%; transform: translateX(-50%) rotate(-8deg); width: 110px; opacity: 0.85; pointer-events: none; }
                     </style>
                 </head>
                 <body>
@@ -490,8 +494,15 @@ app.get('/preview/:id', async (req, res) => {
 
                         <div class="footer-box">
                             <div style="font-size: 11px; color: #64748b;">* Terms & Conditions: Validity 30 days. E. & O.E.</div>
-                            <div style="text-align: center; min-width: 200px;">
+                            <div style="text-align: center; min-width: 200px; position: relative;">
                                 <div style="font-weight: bold; font-size: 14px;">For ${foundDoc.vendor || 'FIRM NAME'}</div>
+                                <svg class="stamp-img" viewBox="0 0 120 120">
+                                    <circle cx="60" cy="60" r="54" fill="none" stroke="#6b21a8" stroke-width="2.5" stroke-dasharray="4,2"/>
+                                    <circle cx="60" cy="60" r="44" fill="none" stroke="#6b21a8" stroke-width="1.5"/>
+                                    <text x="60" y="32" font-size="9" font-weight="bold" fill="#6b21a8" text-anchor="middle" font-family="Arial">SHANEY ENTERPRISE</text>
+                                    <text x="60" y="82" font-size="8" font-weight="bold" fill="#6b21a8" text-anchor="middle" font-family="Arial">JUNAGADH</text>
+                                    <text x="60" y="62" font-size="14" font-weight="bold" fill="#6b21a8" text-anchor="middle" font-family="Georgia" font-style="italic">Navnit</text>
+                                </svg>
                                 <div style="height: 45px;"></div>
                                 <div style="font-size: 13px; font-weight: bold;">Authorised Signature</div>
                             </div>
