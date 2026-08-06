@@ -274,16 +274,17 @@ app.get('/preview/:id', async (req, res) => {
                         .firm-sub { font-size: 14px; font-weight: 900; color: #dc2626; margin-top: 6px; letter-spacing: 0.05em; }
                         .meta-box { text-align: right; font-size: 14px; font-family: 'Georgia', serif; }
                         .party-box { margin-bottom: 25px; font-size: 15.5px; line-height: 1.6; }
-                        .party-val { font-family: 'Caveat', cursive, Georgia, serif; font-size: 20px; font-weight: bold; text-transform: uppercase; margin-left: 10px; }
+                        .party-val { font-family: 'Georgia', serif; font-size: 18px; font-weight: bold; text-transform: uppercase; margin-left: 10px; }
                         .cert-text { text-align: center; font-size: 15.5px; line-height: 1.6; margin-bottom: 25px; font-style: italic; }
                         .cert-table { width: 100%; border-collapse: collapse; border: 1.5px solid #000; margin-bottom: 30px; }
                         .cert-table th { padding: 6px; text-align: center; border: 1px solid #000; font-size: 13px; font-weight: bold; background: transparent; }
                         .cert-table td { padding: 6px; text-align: center; border: 1px solid #000; font-size: 12px; background: transparent; }
-                        .footer-box { margin-top: auto; padding-top: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
+                        .footer-box { margin-top: auto; padding-top: 20px; border-top: 2px solid #00a67e; display: flex; justify-content: space-between; align-items: flex-end; }
+                        .badges-row { display: flex; gap: 15px; align-items: center; font-size: 10px; font-weight: bold; color: #0369a1; margin-bottom: 6px; }
                         .footer-addr { font-size: 10px; font-family: monospace; color: #64748b; line-height: 1.4; }
                         .sign-box { text-align: center; min-width: 220px; font-family: 'Arial', sans-serif; }
                         .sign-title { font-size: 14px; font-weight: bold; }
-                        .sign-space { height: 50px; }
+                        .sign-space { height: 45px; }
                     </style>
                 </head>
                 <body>
@@ -346,19 +347,28 @@ app.get('/preview/:id', async (req, res) => {
                                         </tr>
                                         <tr>
                                             <td style="text-align:left; padding:6px 10px; border:1px solid #000; font-style:italic; font-weight:bold;">Remark</td>
-                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.remark || 'OK'}</td>
+                                            <td colspan="2" style="border:1px solid #000; font-weight:bold;">${items?.rows || items?.remark || 'OK'}</td>
                                         </tr>
                                         ${tableRowsHTML}
                                     </tbody>
                                 </table>
 
                                 <div class="footer-box">
-                                    <div class="footer-addr">
-                                        <div>112, Royal Plaza, Near Sai baba Temple, Zanzarda Road, Junagadh-362001.</div>
-                                        <div>+91 97263 50101 | +91 97264 50101</div>
+                                    <div>
+                                        <div class="badges-row">
+                                            <span>🛡️ ISO CERTIFIED</span>
+                                            <span>⭐ GeM SELLER</span>
+                                            <span>🏛️ MSME REGD.</span>
+                                            <span>🇮🇳 MAKE IN INDIA</span>
+                                        </div>
+                                        <div class="footer-addr">
+                                            <div>112, Royal Plaza, Near Sai baba Temple, Zanzarda Road, Junagadh-362001.</div>
+                                            <div>+91 97263 50101 | +91 97264 50101</div>
+                                            <div>shaneyenterprise101@gmail.com</div>
+                                        </div>
                                     </div>
                                     <div class="sign-box">
-                                        <div class="sign-title">For ${foundDoc.vendor || 'COMPANY ENTERPRISE'}</div>
+                                        <div class="sign-title" style="font-style:italic;">For ${foundDoc.vendor || 'COMPANY ENTERPRISE'}</div>
                                         <div class="sign-space"></div>
                                         <div class="sign-title">Authorised Signature</div>
                                     </div>
