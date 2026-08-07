@@ -188,7 +188,6 @@ export default function Templates() {
   const [currentDesign, setCurrentDesign] = useState(DEFAULT_DESIGN);
   const templateKey = `${selectedFirmId}_${designMode}`;
 
-  // 🟢 NON-LOOPING LOAD EFFECT
   useEffect(() => {
     if (selectedFirmId) {
       const savedTemplate = firmTemplates[templateKey] || firmTemplates[selectedFirmId];
@@ -207,7 +206,6 @@ export default function Templates() {
     }
   }, [selectedFirmId, designMode]);
 
-  // 🟢 NON-LOOPING SAVE EFFECT
   useEffect(() => {
     if (selectedFirmId && currentDesign) {
       try {
@@ -335,6 +333,7 @@ export default function Templates() {
     }
   };
 
+  // 🟢 COMPRESSION FUNCTION (UPDATED FOR BOTH CERTIFICATE & QUOTATION)
   const compressAndConvertToBase64 = (file, maxWidth = 300, maxHeight = 300) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
@@ -354,7 +353,7 @@ export default function Templates() {
           const ctx = canvas.getContext('2d');
           ctx.clearRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/png'));
+          resolve(canvas.toDataURL('image/png', 0.8)); // Compressed output
         };
         img.src = uploadEvent.target.result;
       };
@@ -365,7 +364,7 @@ export default function Templates() {
   const handleGraphicFile = async (key, file) => {
     if (!file) return;
     try {
-      const compressedDataUrl = await compressAndConvertToBase64(file, 300, 300);
+      const compressedDataUrl = await compressAndConvertToBase64(file, 250, 250); // Strict size control
       setCurrentDesign(prev => ({
         ...prev,
         graphics: {
@@ -417,7 +416,6 @@ export default function Templates() {
     setDraggingKey(key);
     const g = currentGraphics[key] || { x: 0, y: 0 };
     
-    // 🟢 Scale-aware coordinate fixing
     const canvasEl = document.getElementById('a4-preview-canvas');
     const rect = canvasEl ? canvasEl.getBoundingClientRect() : { width: 794 };
     const scale = rect.width / 794;

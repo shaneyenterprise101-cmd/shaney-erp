@@ -152,6 +152,7 @@ export default function Product() {
     setRates({});
   };
 
+  // 🟢 FIXED: Properly load existing product rates and details into form state on Edit
   const handleEditProduct = (prod) => {
     setEditingProductId(prod.id);
     setDescription(prod.description || '');
@@ -161,7 +162,6 @@ export default function Product() {
 
   const handleDeleteProduct = async (id) => {
     if (confirm('Are you sure you want to delete this item?')) {
-      // 🟢 Use SyncManager to delete from Local, SQLite, and Cloud simultaneously
       await SyncManager.deleteData('ERP_Products_v104', 'products', id);
       
       const saved = SyncManager.getLocalData('ERP_Products_v104', []);
@@ -175,7 +175,6 @@ export default function Product() {
     if (selectedProductIds.length === 0) return alert('Please select at least one item to delete!');
     if (confirm(`Are you sure you want to delete ${selectedProductIds.length} selected item(s)?`)) {
       for (let id of selectedProductIds) {
-        // 🟢 Use SyncManager for bulk deletion across all storage layers
         await SyncManager.deleteData('ERP_Products_v104', 'products', id);
       }
       const saved = SyncManager.getLocalData('ERP_Products_v104', []);
