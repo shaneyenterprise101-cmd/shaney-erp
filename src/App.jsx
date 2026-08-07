@@ -24,7 +24,6 @@ const getCurrentFY = () => {
   return m >= 4 ? `F.Y. ${y}-${String(y + 1).slice(-2)}` : `F.Y. ${y - 1}-${String(y).slice(-2)}`;
 };
 
-// 🟢 Robust Normalizer for Financial Year to prevent duplicates
 const normalizeFY = (fyStr) => {
   if (!fyStr || fyStr === 'ALL') return fyStr;
   let clean = String(fyStr).trim().toUpperCase();
@@ -43,11 +42,9 @@ export default function App() {
   const [previewDocData, setPreviewDocData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(isPreviewRoute);
 
-  // 🟢 Optimized Background Auto Delta Sync Worker with Cross-Device Broadcast
   useEffect(() => {
     const runRealtimeSync = async () => {
       try {
-        // 1. Electron SQLite delta sync agar available ho
         if (window.require) {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer) {
@@ -69,7 +66,6 @@ export default function App() {
           }
         }
 
-        // 2. Cloud se fresh data fetch karke local storage aur window events update karna
         const res = await fetch(`${BACKEND_URL}/api/data`);
         if (res.ok) {
           const allData = await res.json();
@@ -108,7 +104,7 @@ export default function App() {
     };
 
     runRealtimeSync();
-    const syncInterval = setInterval(runRealtimeSync, 8000); // Har 8 seconds par live sync check
+    const syncInterval = setInterval(runRealtimeSync, 8000);
     return () => clearInterval(syncInterval);
   }, []);
 
@@ -136,7 +132,6 @@ export default function App() {
             if (cloudJson && cloudJson.data) {
               const data = cloudJson.data;
               const docTypeKey = data.docType || 'certificate';
-              // 🟢 PERMANENT SECURITY CACHING: Save locally on first load so no further server reads occur
               localStorage.setItem(`shaney_${docTypeKey}_${previewDocId}`, JSON.stringify(data));
               setPreviewDocData({ type: docTypeKey, data });
               setPreviewLoading(false);
@@ -181,7 +176,6 @@ export default function App() {
   
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
-  // 🟢 Fixed FY States & Initial Modes with Normalized Unique Values
   const [selectedFY, setSelectedFY] = useState(getCurrentFY());
   const [availableFYs, setAvailableFYs] = useState(() => {
     try {
@@ -677,16 +671,17 @@ export default function App() {
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-slate-950 z-0"></div>
         <div className="absolute inset-0 bg-[radial-gradient(#00a67e_1px,transparent_1px)] [background-size:24px_24px] opacity-10 z-0"></div>
 
+        {/* 🟢 विजिटिंग कार्ड हटाकर यहाँ असली लोगो सेट कर दिया गया है */}
         <div className="w-full lg:w-1/2 flex items-center justify-center relative z-10 max-w-lg">
-          <div className="group relative w-full bg-slate-900/80 backdrop-blur-xl p-4 sm:p-6 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/30 overflow-hidden flex items-center justify-center">
-            <img 
-              src="/visitingcard.jpeg" 
-              alt="Visiting Card" 
-              className="w-full h-auto object-contain rounded-2xl transition-transform duration-500 ease-in-out group-hover:scale-105 shadow-2xl bg-transparent"
-              onError={(e)=>{e.target.src=logoImage}}
-            />
-          </div>
-        </div>
+  <div className="group relative w-full bg-slate-900/80 backdrop-blur-xl p-4 sm:p-6 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/30 overflow-hidden flex items-center justify-center">
+    <img 
+      src={logoImage} 
+      alt="Company Logo" 
+      className="w-full h-auto object-contain rounded-2xl transition-transform duration-500 ease-in-out group-hover:scale-105 shadow-2xl bg-transparent"
+      onError={(e)=>{e.target.src="/Shaney Logo.jpg"}}
+    />
+  </div>
+</div>
 
         <div className="w-full lg:w-1/2 flex items-center justify-center relative z-10 max-w-lg">
           <form onSubmit={handleAuthSubmit} className="w-full bg-slate-900/90 backdrop-blur-2xl p-6 sm:p-8 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/40">

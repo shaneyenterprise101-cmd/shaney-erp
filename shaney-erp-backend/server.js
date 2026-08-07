@@ -536,11 +536,18 @@ app.get('/preview/:id', async (req, res) => {
     }
 });
 
-// 6. Save Data to DynamoDB
+// 6. Save Data to DynamoDB (Clean & Sanitized Payload Handler)
 app.post('/api/data', async (req, res) => {
     try {
         const key = req.body.key || req.body.type || 'general';
         let item = req.body.item || req.body.data || req.body;
+
+        // Ignore or clean deleted flags/nested pollution if present
+        if (item && typeof item === 'object') {
+            if (item.deleted) {
+                delete item.deleted;
+            }
+        }
 
         const existing = await dynamo.send(new GetCommand({
             TableName: TABLE_NAME,
@@ -567,7 +574,7 @@ app.post('/api/data', async (req, res) => {
             Item: {
                 id: key,
                 data: list,
-                updatedAt: new Date().toISOString()
+                updatedAt: Date.now()
             }
         }));
 
@@ -595,7 +602,7 @@ app.delete('/api/data/:id', async (updatedReq, res) => {
                         Item: {
                             id: record.id,
                             data: filteredData,
-                            updatedAt: new Date().toISOString()
+                            updatedAt: Date.now()
                         }
                     }));
                     deleted = true;

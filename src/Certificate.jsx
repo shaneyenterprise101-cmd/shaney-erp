@@ -59,26 +59,6 @@ const getFinancialYear = (refStr, dateStr) => {
   }
 };
 
-const sanitizeForCloud = (dataObj) => {
-  let cleaned = { ...dataObj };
-  if (!cleaned.updatedAt) {
-    cleaned.updatedAt = Date.now();
-  }
-  
-  if (cleaned.fy && cleaned.fy !== 'ALL') {
-    cleaned.fy = normalizeFY(cleaned.fy);
-  } else {
-    cleaned.fy = normalizeFY(getFinancialYear(cleaned.ref, cleaned.date || cleaned.validDate) || getCurrentFY());
-  }
-
-  Object.keys(cleaned).forEach(key => {
-    if (cleaned[key] === undefined) {
-      cleaned[key] = null;
-    }
-  });
-  return cleaned;
-};
-
 const getDynamicPrefix = () => {
   const d = new Date();
   const m = d.getMonth() + 1;
@@ -102,11 +82,11 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const rowsPerPage = 10;
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
-  // --- CLOUD-FIRST & ELECTRON SQLite INITIALIZATION ---
+  // --- STRICT FILTER FOR CERTIFICATES ONLY ---
   const [certificates, setCertificates] = useState(() => {
     try {
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
-      return saved.filter(b => b.docType === 'certificate' || b.ref);
+      return saved.filter(b => b.docType === 'certificate');
     } catch(e) { return []; }
   });
 
@@ -116,7 +96,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       try {
         const freshData = await SyncManager.fetchFreshDataIfNeeded('ERP_History_v104', 'certificates');
         if (isMounted && Array.isArray(freshData)) {
-          const certsOnly = freshData.filter(b => b.docType === 'certificate' || b.ref);
+          const certsOnly = freshData.filter(b => b.docType === 'certificate');
           setCertificates([...certsOnly]);
         }
       } catch (err) {
@@ -128,7 +108,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     const handleDataUpdate = (e) => {
       if (!e.detail || e.detail.type === 'certificates' || e.detail.type === 'all' || e.detail.type === 'templates') {
         const saved = SyncManager.getLocalData('ERP_History_v104', []);
-        if (isMounted) setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+        if (isMounted) setCertificates([...saved.filter(b => b.docType === 'certificate')]);
         const savedTemplates = SyncManager.getLocalData('ERP_FirmTemplates_v104', {});
         if (savedTemplates) setFirmTemplates(savedTemplates);
       }
@@ -144,7 +124,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   useEffect(() => {
     const interval = setInterval(() => {
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
-      const certsOnly = saved.filter(b => b.docType === 'certificate' || b.ref);
+      const certsOnly = saved.filter(b => b.docType === 'certificate');
       setCertificates(prev => {
         if (JSON.stringify(prev) !== JSON.stringify(certsOnly)) {
           return [...certsOnly];
@@ -264,8 +244,8 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   useEffect(() => {
     let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
     allHistory = allHistory.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-    const certs = allHistory.filter(c => c.docType === 'certificate' || c.ref);
-    const others = allHistory.filter(c => c.docType !== 'certificate' && !c.ref);
+    const certs = allHistory.filter(c => c.docType === 'certificate');
+    const others = allHistory.filter(c => c.docType !== 'certificate');
     
     let hasDuplicates = false;
     const uniqueCerts = [];
@@ -334,7 +314,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       const savedFirms = SyncManager.getLocalData('ERP_Companies_v104', []).filter(f => f.type === 'certificate');
       const activeId = formData.activeFirmId || (savedFirms.length > 0 ? savedFirms[0].id : '');
       const f = savedFirms.find(x => x.id === activeId);
-      const allHist = SyncManager.getLocalData('ERP_History_v104', []).filter(b => b.docType === 'certificate' || b.ref);
+      const allHist = SyncManager.getLocalData('ERP_History_v104', []).filter(b => b.docType === 'certificate');
 
       if (f) {
         const firmCerts = allHist.filter(c => c.vendor === f.name);
@@ -472,7 +452,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
        await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
        
        const saved = SyncManager.getLocalData('ERP_History_v104', []);
-       setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+       setCertificates([...saved.filter(b => b.docType === 'certificate')]);
     }
   };
 
@@ -492,7 +472,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     });
   };
 
-  // 🟢 CAPACITOR SHARE & CLIPBOARD INTEGRATION
+  // 🟢 WHATSAPP SHARE WITH WHATSapSent SUCCESS ICON FLAG RESTORED
   const handleWhatsAppSend = async (e, cert, type = 'doc') => {
     e.stopPropagation(); 
 
@@ -518,7 +498,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           scaleWrapper.style.transform = 'none';
         }
 
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 400));
 
         const dataUrl = await toJpeg(element, {
           quality: 0.85,
@@ -570,7 +550,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         document.body.style.cursor = 'default';
         setActivePreviewCert(null);
 
-        // 🟢 टेक्स्ट मैसेज को क्लिपबोर्ड में कॉपी करें ताकि WhatsApp पर आसानी से पेस्ट किया जा सके
         try {
           await navigator.clipboard.writeText(msg);
         } catch (clipErr) {
@@ -584,13 +563,24 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           dialogTitle: 'Share via WhatsApp'
         });
 
+        // 🟢 Mark as WhatsApp Sent so the green tick/logo appears on UI
+        let allHistory = SyncManager.getLocalData('ERP_History_v104', []);
+        const idx = allHistory.findIndex(h => String(h.id) === String(cert.id));
+        if (idx !== -1) {
+          allHistory[idx].whatsappSent = true;
+          allHistory[idx].updatedAt = Date.now();
+          await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+          const saved = SyncManager.getLocalData('ERP_History_v104', []);
+          setCertificates([...saved.filter(b => b.docType === 'certificate')]);
+        }
+
       } catch (err) {
         console.error("Capacitor Share failed:", err);
         document.body.style.cursor = 'default';
         setActivePreviewCert(null);
         alert(`Could not share PDF. Reason: ${err.message || err}`);
       }
-    }, 400);
+    }, 600);
   };
 
   const executeDocumentAction = async (actionType, elementId, filename) => {
@@ -723,7 +713,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     if(confirm('Are you sure you want to delete this record?')) {
       await SyncManager.deleteData('ERP_History_v104', 'certificates', id);
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
-      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+      setCertificates([...saved.filter(b => b.docType === 'certificate')]);
       setSelectedCertIds(selectedCertIds.filter(i => String(i) !== String(id)));
     }
   };
@@ -755,7 +745,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         await SyncManager.deleteData('ERP_History_v104', 'certificates', id);
       }
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
-      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+      setCertificates([...saved.filter(b => b.docType === 'certificate')]);
       setSelectedCertIds([]);
     }
   };
@@ -775,7 +765,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
       
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
-      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+      setCertificates([...saved.filter(b => b.docType === 'certificate')]);
     }
   };
 
@@ -785,7 +775,40 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       alert('Please enter Customer Name and Amount!');
       return;
     }
+
+    const certId = editingCertId ? editingCertId : Date.now().toString();
+    const calculatedFY = normalizeFY(getFinancialYear(formData.serialNo, formData.refillDate));
+
+    const existingCert = certificates.find(c => String(c.id) === String(certId));
+    const existingPayments = existingCert ? existingCert.payments || [] : [];
+
+    const certPayload = {
+      id: certId,
+      docType: 'certificate',
+      vendor: activeFirmObj.name,
+      party: formData.client.trim().toUpperCase(),
+      date: toDDMMYYYY(formData.refillDate),
+      ref: formData.serialNo.trim(),
+      validDate: toDDMMYYYY(formData.validUpTo),
+      submitName: formData.submitBy,
+      confirmName: formData.confirmBy,
+      collectedName: formData.collectedBy,
+      total: Number(formData.amount) || 0,
+      payment: formData.payMethod,
+      workStatus: existingCert ? (existingCert.workStatus || 'New') : 'New',
+      itemsData: JSON.stringify(tableData),
+      fy: calculatedFY,
+      payments: existingPayments,
+      whatsappSent: existingCert ? !!existingCert.whatsappSent : false,
+      updatedAt: Date.now()
+    };
+
+    await SyncManager.saveData('ERP_History_v104', 'certificates', certPayload);
     
+    const saved = SyncManager.getLocalData('ERP_History_v104', []);
+    setCertificates([...saved.filter(b => b.docType === 'certificate')]);
+    setEditingCertId(null);
+
     if (directAction === 'print') {
       setTimeout(() => { 
         executeDocumentAction('print', 'create-cert-print-area', formData.serialNo); 
@@ -821,7 +844,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
       await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
-      setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+      setCertificates([...saved.filter(b => b.docType === 'certificate')]);
       setActiveCert(allHistory[idx]);
       setPaymentForm({ amount: '', method: paymentMethods[0] || 'CASH', note: '' });
       alert('✅ Payment Added & Updated!');
@@ -844,7 +867,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
 
         await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
         const saved = SyncManager.getLocalData('ERP_History_v104', []);
-        setCertificates([...saved.filter(b => b.docType === 'certificate' || b.ref)]);
+        setCertificates([...saved.filter(b => b.docType === 'certificate')]);
         setActiveCert(allHistory[idx]);
         alert('🗑️ Payment Receipt Deleted & Credit Updated!');
       }
@@ -1118,17 +1141,23 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                   </table>
                 </div>
 
+                {/* 🟢 FIXED LOGO & FOOTER GRAPHICS SECTION FOR WHATSAPP/PDF EXPORT */}
                 <div className="mt-auto pt-4 flex justify-between items-end z-20 relative">
-                  <div className="font-mono" style={{ fontSize: `${Math.max(9, Math.floor(docS * 0.65))}px`, color: '#64748b' }}>
-                    {!design.a4BgUrl && (
-                      <>
-                        <p>{firmObj.address}</p>
-                        <p>{firmObj.contact}</p>
-                      </>
-                    )}
+                  <div className="flex flex-col gap-1">
+                    <div className="flex gap-2 items-center text-[8px] font-bold text-sky-700">
+                      <span>🛡️ ISO CERTIFIED</span>
+                      <span>⭐ GeM SELLER</span>
+                      <span>🏛️ MSME REGD.</span>
+                      <span>🇮🇳 MAKE IN INDIA</span>
+                    </div>
+                    <div className="font-mono text-[9px]" style={{ color: '#64748b' }}>
+                      <p>{firmObj.address}</p>
+                      <p>{firmObj.contact}</p>
+                    </div>
                   </div>
+
                   <div 
-                    className="ml-auto text-center min-w-[220px]" 
+                    className="ml-auto text-center min-w-[200px] relative" 
                     style={{ 
                       fontFamily: design.sigFont || 'Arial', 
                       color: design.sigColor || '#000000',
@@ -1145,6 +1174,14 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                     }}>
                       For {firmObj.name}
                     </p>
+                    {/* Official Purple Round Stamp SVG for WhatsApp/PDF Export */}
+                    <svg style={{ position: 'absolute', bottom: '15px', left: '50%', transform: 'translateX(-50%) rotate(-7deg)', width: '95px', opacity: 0.88, pointerEvents: 'none' }} viewBox="0 0 120 120">
+                      <circle cx="60" cy="60" r="54" fill="none" stroke="#6b21a8" strokeWidth="2.5" strokeDasharray="4,2"/>
+                      <circle cx="60" cy="60" r="44" fill="none" stroke="#6b21a8" strokeWidth="1.5"/>
+                      <text x="60" y="32" fontSize="9" fontWeight="bold" fill="#6b21a8" textAnchor="middle" fontFamily="Arial">SHANEY ENTERPRISE</text>
+                      <text x="60" y="82" fontSize="8" fontWeight="bold" fill="#6b21a8" textAnchor="middle" fontFamily="Arial">JUNAGADH</text>
+                      <text x="60" y="62" fontSize="14" fontWeight="bold" fill="#6b21a8" textAnchor="middle" fontFamily="Georgia" fontStyle="italic">Navnit</text>
+                    </svg>
                     <div className="h-12"></div>
                     <p style={{ 
                       fontSize: `${design.sigSize || 14}px`, 
@@ -1289,7 +1326,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                       <input 
                         type="text" 
                         list="certCustomerList"
-                        placeholder="Customer Name..." 
+                        placeholder="Type or select customer..." 
                         value={formData.client} 
                         onChange={handleCustomerChange} 
                         className="pro-input border-slate-300 bg-white shadow-inner font-bold" 
