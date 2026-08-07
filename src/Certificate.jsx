@@ -1162,23 +1162,17 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                   </table>
                 </div>
 
-                {/* 🟢 FIXED LOGO & FOOTER GRAPHICS SECTION FOR WHATSAPP/PDF EXPORT */}
                 <div className="mt-auto pt-4 flex justify-between items-end z-20 relative">
-                  <div className="flex flex-col gap-1">
-                    <div className="flex gap-2 items-center text-[8px] font-bold text-sky-700">
-                      <span>🛡️ ISO CERTIFIED</span>
-                      <span>⭐ GeM SELLER</span>
-                      <span>🏛️ MSME REGD.</span>
-                      <span>🇮🇳 MAKE IN INDIA</span>
-                    </div>
-                    <div className="font-mono text-[9px]" style={{ color: '#64748b' }}>
-                      <p>{firmObj.address}</p>
-                      <p>{firmObj.contact}</p>
-                    </div>
+                  <div className="font-mono" style={{ fontSize: `${Math.max(9, Math.floor(docS * 0.65))}px`, color: '#64748b' }}>
+                    {!design.a4BgUrl && (
+                      <>
+                        <p>{firmObj.address}</p>
+                        <p>{firmObj.contact}</p>
+                      </>
+                    )}
                   </div>
-
                   <div 
-                    className="ml-auto text-center min-w-[200px] relative" 
+                    className="ml-auto text-center min-w-[220px]" 
                     style={{ 
                       fontFamily: design.sigFont || 'Arial', 
                       color: design.sigColor || '#000000',
@@ -1195,14 +1189,6 @@ export default function Certificate({ selectedFY, initialViewMode }) {
                     }}>
                       For {firmObj.name}
                     </p>
-                    {/* Official Purple Round Stamp SVG for WhatsApp/PDF Export */}
-                    <svg style={{ position: 'absolute', bottom: '15px', left: '50%', transform: 'translateX(-50%) rotate(-7deg)', width: '95px', opacity: 0.88, pointerEvents: 'none' }} viewBox="0 0 120 120">
-                      <circle cx="60" cy="60" r="54" fill="none" stroke="#6b21a8" strokeWidth="2.5" strokeDasharray="4,2"/>
-                      <circle cx="60" cy="60" r="44" fill="none" stroke="#6b21a8" strokeWidth="1.5"/>
-                      <text x="60" y="32" fontSize="9" fontWeight="bold" fill="#6b21a8" textAnchor="middle" fontFamily="Arial">SHANEY ENTERPRISE</text>
-                      <text x="60" y="82" fontSize="8" fontWeight="bold" fill="#6b21a8" textAnchor="middle" fontFamily="Arial">JUNAGADH</text>
-                      <text x="60" y="62" fontSize="14" fontWeight="bold" fill="#6b21a8" textAnchor="middle" fontFamily="Georgia" fontStyle="italic">Navnit</text>
-                    </svg>
                     <div className="h-12"></div>
                     <p style={{ 
                       fontSize: `${design.sigSize || 14}px`, 
