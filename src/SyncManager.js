@@ -40,7 +40,7 @@ export const SyncManager = {
         }
       }
 
-      // Save to Cloud Backend API
+      // Save to Cloud Backend API using specific firestoreCollection
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -76,6 +76,7 @@ export const SyncManager = {
         }
       }
 
+      // Delete from Cloud Backend API
       await fetch(`${BACKEND_URL}/api/data/${itemId}`, { method: 'DELETE' });
 
       return true;
@@ -119,15 +120,17 @@ export const SyncManager = {
         const allData = await res.json();
         let rawList = [];
         
+        // 🟢 ISOLATED FETCH: Strictly use firestoreCollection without cross-mixing history/quotations
         if (Array.isArray(allData)) {
           rawList = allData;
         } else if (allData && typeof allData === 'object') {
-          if (allData[firestoreCollection] && Array.isArray(allData[firestoreCollection])) {
+          if (firestoreCollection && allData[firestoreCollection] && Array.isArray(allData[firestoreCollection])) {
             rawList = allData[firestoreCollection];
-          } else if (storageKey === 'ERP_History_v104') {
-            if (Array.isArray(allData.certificates)) rawList.push(...allData.certificates);
-            if (Array.isArray(allData.quotations)) rawList.push(...allData.quotations);
-            if (Array.isArray(allData.history)) rawList.push(...allData.history);
+          } else if (firestoreCollection && allData[firestoreCollection]) {
+            // Handle single object or nested collection maps if returned as object
+            let targetCol = allData[firestoreCollection];
+            if (Array.isArray(targetCol)) rawList = targetCol;
+            else rawList = [targetCol];
           } else {
             Object.values(allData).forEach(val => {
               if (Array.isArray(val)) rawList.push(...val);
@@ -190,7 +193,7 @@ export const SyncManager = {
             } catch (err) {}
           }
 
-          // 🟢 CRITICAL FIX: Trigger UI update event so pages (Products/Certificates) reload instantly
+          // 🟢 CRITICAL FIX: Trigger UI update event so pages reload instantly
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: firestoreCollection } }));
           }
