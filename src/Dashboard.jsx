@@ -536,7 +536,7 @@ export default function Dashboard({ currentUser, setActiveTab }) {
   }, [districtData]);
 
   return (
-    <div className="animate-[fadeIn_0.3s_ease-in-out]">
+    <div className="w-full relative min-h-screen bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 pb-20 animate-[fadeIn_0.3s_ease-in-out]">
       {/* 👋 WELCOME BANNER */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <div>
