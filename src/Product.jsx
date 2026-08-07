@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import * as XLSX from 'xlsx';
+import { SyncManager } from './SyncManager';
 
 const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
@@ -32,65 +33,56 @@ const logActionToBackend = async (actionText) => {
 
 export default function Product() {
   const [firms, setFirms] = useState(() => {
-    const saved = localStorage.getItem('ERP_Companies_v104');
-    return saved ? JSON.parse(saved).filter(f => f.type === 'quotation') : [];
+    const saved = SyncManager.getLocalData('ERP_Companies_v104', []);
+    return saved.filter(f => f.type === 'quotation');
   });
 
   const [products, setProducts] = useState(() => {
-    const saved = localStorage.getItem('ERP_Products_v104');
-    let initialProd = saved ? JSON.parse(saved) : [];
-    return initialProd.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
+    const saved = SyncManager.getLocalData('ERP_Products_v104', []);
+    return saved
+      .filter(item => item && item.description && String(item.description).trim() !== '' && item.id !== 'products')
+      .map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
   });
 
+  const hasFetchedRef = useRef(false);
+
   useEffect(() => {
-    const handleDataUpdate = (e) => {
-      if (!e.detail || e.detail.type === 'products' || e.detail.type === 'settings') {
-        const saved = localStorage.getItem('ERP_Products_v104');
-        if (saved) {
-          let parsedData = JSON.parse(saved);
-          parsedData = parsedData.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-          setProducts(parsedData);
+    let isMounted = true;
+    async function initProducts() {
+      if (hasFetchedRef.current) return;
+      hasFetchedRef.current = true;
+
+      try {
+        const freshData = await SyncManager.fetchFreshDataIfNeeded('ERP_Products_v104', 'products');
+        if (isMounted && Array.isArray(freshData)) {
+          const prodsOnly = freshData.filter(b => b && b.description && String(b.description).trim() !== '' && b.id !== 'products');
+          const mapped = prodsOnly.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
+          setProducts(mapped);
         }
-        const savedFirms = localStorage.getItem('ERP_Companies_v104');
+      } catch (err) {
+        console.error("Init product fetch error:", err);
+      }
+    }
+    initProducts();
+
+    const handleDataUpdate = (e) => {
+      if (!e.detail || e.detail.type === 'products' || e.detail.type === 'all' || e.detail.type === 'settings') {
+        const saved = SyncManager.getLocalData('ERP_Products_v104', []);
+        if (isMounted) {
+          const prodsOnly = saved.filter(b => b && b.description && String(b.description).trim() !== '' && b.id !== 'products');
+          setProducts(prodsOnly);
+        }
+        const savedFirms = SyncManager.getLocalData('ERP_Companies_v104', []);
         if (savedFirms) {
-          setFirms(JSON.parse(savedFirms).filter(f => f.type === 'quotation'));
+          setFirms(savedFirms.filter(f => f.type === 'quotation'));
         }
       }
     };
     window.addEventListener('ERP_DATA_UPDATED', handleDataUpdate);
-    return () => window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
-  }, []);
-
-  useEffect(() => {
-    const fetchCloudProducts = async () => {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/data`);
-        if (res.ok) {
-          const allData = await res.json();
-          if (allData && typeof allData === 'object') {
-            let cloudProd = [];
-            if (Array.isArray(allData)) {
-              cloudProd = allData.filter(item => item.docType === 'product');
-            } else if (allData.products && Array.isArray(allData.products)) {
-              cloudProd = allData.products;
-            } else if (allData.payload) {
-              try {
-                const parsed = JSON.parse(allData.payload);
-                if (parsed.products) cloudProd = parsed.products;
-              } catch(e){}
-            }
-            if (cloudProd.length > 0) {
-              cloudProd = cloudProd.map(item => (!item.updatedAt ? { ...item, updatedAt: Date.now() } : item));
-              setProducts(cloudProd);
-              localStorage.setItem('ERP_Products_v104', JSON.stringify(cloudProd));
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Error fetching products from cloud:", err);
-      }
+    return () => {
+      isMounted = false;
+      window.removeEventListener('ERP_DATA_UPDATED', handleDataUpdate);
     };
-    fetchCloudProducts();
   }, []);
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -115,7 +107,6 @@ export default function Product() {
       return;
     }
 
-    // 🟢 CLEAN RATES: Save only by firm ID to avoid duplication
     let cleanRates = {};
     firms.forEach(f => {
       if (rates[f.id] !== undefined && rates[f.id] !== '' && rates[f.id] !== null) {
@@ -135,9 +126,7 @@ export default function Product() {
         rates: cleanRates,
         updatedAt: currentTimestamp
       };
-      const updated = products.map(p => p.id === editingProductId ? prodObj : p);
-      setProducts(updated);
-      localStorage.setItem('ERP_Products_v104', JSON.stringify(updated));
+      await SyncManager.saveData('ERP_Products_v104', 'products', prodObj);
       setEditingProductId(null);
       logActionToBackend(`Updated Product: ${prodObj.description}`);
       alert('✅ Item Updated Successfully!');
@@ -150,28 +139,13 @@ export default function Product() {
         rates: cleanRates,
         updatedAt: currentTimestamp
       };
-      const updated = [...products, prodObj];
-      setProducts(updated);
-      localStorage.setItem('ERP_Products_v104', JSON.stringify(updated));
+      await SyncManager.saveData('ERP_Products_v104', 'products', prodObj);
       logActionToBackend(`Created Product: ${prodObj.description}`);
       alert('✅ Item Saved Successfully!');
     }
 
-    try {
-      if (prodObj) {
-        await fetch(`${BACKEND_URL}/api/data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'products', id: String(prodObj.id), data: prodObj })
-        });
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', prodObj);
-        }
-      }
-    } catch (err) {
-      console.error("Cloud product save error:", err);
-    }
+    const saved = SyncManager.getLocalData('ERP_Products_v104', []);
+    setProducts(saved.filter(b => b && b.description && String(b.description).trim() !== '' && b.id !== 'products'));
 
     setDescription('');
     setHsn('8424');
@@ -187,43 +161,25 @@ export default function Product() {
 
   const handleDeleteProduct = async (id) => {
     if (confirm('Are you sure you want to delete this item?')) {
-      const updated = products.filter(p => p.id !== id);
-      setProducts(updated);
-      localStorage.setItem('ERP_Products_v104', JSON.stringify(updated));
+      // 🟢 Use SyncManager to delete from Local, SQLite, and Cloud simultaneously
+      await SyncManager.deleteData('ERP_Products_v104', 'products', id);
+      
+      const saved = SyncManager.getLocalData('ERP_Products_v104', []);
+      setProducts(saved.filter(b => b && b.description && String(b.description).trim() !== '' && b.id !== 'products'));
       setSelectedProductIds(selectedProductIds.filter(i => i !== id));
-
-      try {
-        await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id, deleted: true, updatedAt: Date.now() });
-        }
-        logActionToBackend(`Deleted Product ID: ${id}`);
-      } catch (err) {
-        console.error("Cloud product delete error:", err);
-      }
+      logActionToBackend(`Deleted Product ID: ${id}`);
     }
   };
 
   const handleDeleteSelected = async () => {
     if (selectedProductIds.length === 0) return alert('Please select at least one item to delete!');
     if (confirm(`Are you sure you want to delete ${selectedProductIds.length} selected item(s)?`)) {
-      const updated = products.filter(p => !selectedProductIds.includes(p.id));
-      setProducts(updated);
-      localStorage.setItem('ERP_Products_v104', JSON.stringify(updated));
-
       for (let id of selectedProductIds) {
-        try {
-          await fetch(`${BACKEND_URL}/api/data/${id}`, { method: 'DELETE' });
-          if (window.require) {
-            const { ipcRenderer } = window.require('electron');
-            if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id, deleted: true, updatedAt: Date.now() });
-          }
-        } catch (err) {
-          console.error("Cloud product delete error:", err);
-        }
+        // 🟢 Use SyncManager for bulk deletion across all storage layers
+        await SyncManager.deleteData('ERP_Products_v104', 'products', id);
       }
-
+      const saved = SyncManager.getLocalData('ERP_Products_v104', []);
+      setProducts(saved.filter(b => b && b.description && String(b.description).trim() !== '' && b.id !== 'products'));
       setSelectedProductIds([]);
       logActionToBackend(`Deleted multiple products from inventory`);
     }
@@ -385,7 +341,7 @@ export default function Product() {
                         </span>
                         {Object.entries(p.rates || {}).map(([fKey, r]) => {
                           const fObj = firms.find(x => x.id === fKey);
-                          if (!fObj) return null; // Only show badge if valid firm ID exists
+                          if (!fObj) return null;
                           return r ? <span key={fKey} className="inline-block bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded text-[10px] font-bold">₹{r} ({fObj.name})</span> : null;
                         })}
                       </div>

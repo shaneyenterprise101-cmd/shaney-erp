@@ -87,21 +87,21 @@ export const SyncManager = {
 
   async fetchFreshDataIfNeeded(storageKey, firestoreCollection) {
     try {
-      // 1. First check Electron local SQLite DB if running as desktop app (.exe)
+      // 1. Get Local SQLite Records first if running in Electron
+      let sqliteRecords = [];
       if (typeof window !== 'undefined' && window.require) {
         try {
           const { ipcRenderer } = window.require('electron');
           if (ipcRenderer && storageKey === 'ERP_History_v104') {
-            const sqliteRecords = await ipcRenderer.invoke('sqlite-get-records');
-            if (Array.isArray(sqliteRecords) && sqliteRecords.length > 0) {
+            sqliteRecords = await ipcRenderer.invoke('sqlite-get-records') || [];
+            if (sqliteRecords.length > 0) {
               localStorage.setItem(storageKey, JSON.stringify(sqliteRecords));
-              return sqliteRecords;
             }
           }
         } catch (err) {}
       }
 
-      // 2. Fetch from Cloud Backend API with Retry Loop
+      // 2. Fetch from Cloud Backend API to check for latest updates
       let res = null;
       let retries = 3;
       while (retries > 0) {
@@ -110,8 +110,8 @@ export const SyncManager = {
           if (res.ok) break;
         } catch (err) {
           retries--;
-          if (retries === 0) throw err;
-          await new Promise(r => setTimeout(r, 3000));
+          if (retries === 0) break; // Don't block app if offline, fallback to local
+          await new Promise(r => setTimeout(r, 2000));
         }
       }
 
@@ -122,11 +122,9 @@ export const SyncManager = {
         if (Array.isArray(allData)) {
           rawList = allData;
         } else if (allData && typeof allData === 'object') {
-          // 🟢 Direct Mapping for Cloud Response Structure (certificates, customers, products, etc.)
           if (allData[firestoreCollection] && Array.isArray(allData[firestoreCollection])) {
             rawList = allData[firestoreCollection];
           } else if (storageKey === 'ERP_History_v104') {
-            // Combine certificates and quotations into ERP History history array
             if (Array.isArray(allData.certificates)) rawList.push(...allData.certificates);
             if (Array.isArray(allData.quotations)) rawList.push(...allData.quotations);
             if (Array.isArray(allData.history)) rawList.push(...allData.history);
@@ -137,37 +135,39 @@ export const SyncManager = {
           }
         }
 
-        let cloudData = rawList.map(item => {
-          if (!item) return null;
-          if (item.data && typeof item.data === 'object') {
-            return { ...item.data, updatedAt: item.updatedAt || item.data.updatedAt || Date.now() };
+        // 🟢 FIXED CLOUD DATA UNWRAPPING FOR BOTH ARRAYS AND OBJECTS (DYNAMODB COMPATIBLE)
+        let cloudData = [];
+        rawList.forEach(item => {
+          if (!item) return;
+          if (Array.isArray(item.data)) {
+            item.data.forEach(sub => {
+              if (sub && sub.id) {
+                cloudData.push({ ...sub, updatedAt: item.updatedAt || sub.updatedAt || Date.now() });
+              }
+            });
+          } else if (item.data && typeof item.data === 'object' && item.data !== null) {
+            if (item.data.id) {
+              cloudData.push({ ...item.data, updatedAt: item.updatedAt || item.data.updatedAt || Date.now() });
+            }
+          } else if (item.id) {
+            cloudData.push({ ...item, updatedAt: item.updatedAt || Date.now() });
           }
-          return { ...item, updatedAt: item.updatedAt || Date.now() };
-        }).filter(item => {
-          if (!item || !item.id) return false;
-          return true;
         });
 
-        if (Array.isArray(cloudData) && cloudData.length > 0) {
-          const localExisting = this.getLocalData(storageKey, []);
-          
+        if (cloudData.length > 0) {
+          // Merge SQLite / Local existing with Cloud data based on latest updatedAt timestamp
+          const localExisting = [...sqliteRecords, ...this.getLocalData(storageKey, [])];
           const mergedMap = new Map();
+          
           localExisting.forEach(item => {
             if (item && item.id != null) mergedMap.set(String(item.id), item);
           });
-          
-          const getSafeTime = (val) => {
-            if (!val) return 0;
-            if (typeof val === 'number') return val;
-            const parsed = new Date(val).getTime();
-            return isNaN(parsed) ? 0 : parsed;
-          };
 
           cloudData.forEach(cloudItem => {
             if (cloudItem && cloudItem.id != null) {
               const localItem = mergedMap.get(String(cloudItem.id));
-              const cloudTime = getSafeTime(cloudItem.updatedAt);
-              const localTime = getSafeTime(localItem?.updatedAt);
+              const cloudTime = Number(cloudItem.updatedAt) || 0;
+              const localTime = Number(localItem?.updatedAt) || 0;
               
               if (!localItem || cloudTime >= localTime) {
                 mergedMap.set(String(cloudItem.id), cloudItem);
@@ -178,6 +178,7 @@ export const SyncManager = {
           const merged = Array.from(mergedMap.values());
           localStorage.setItem(storageKey, JSON.stringify(merged));
 
+          // Save back merged records to Electron SQLite DB
           if (typeof window !== 'undefined' && window.require && storageKey === 'ERP_History_v104') {
             try {
               const { ipcRenderer } = window.require('electron');
@@ -187,6 +188,11 @@ export const SyncManager = {
                 }
               }
             } catch (err) {}
+          }
+
+          // 🟢 CRITICAL FIX: Trigger UI update event so pages (Products/Certificates) reload instantly
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: firestoreCollection } }));
           }
 
           return merged;

@@ -59,6 +59,26 @@ const getFinancialYear = (refStr, dateStr) => {
   }
 };
 
+const sanitizeForCloud = (dataObj) => {
+  let cleaned = { ...dataObj };
+  if (!cleaned.updatedAt) {
+    cleaned.updatedAt = Date.now();
+  }
+  
+  if (cleaned.fy && cleaned.fy !== 'ALL') {
+    cleaned.fy = normalizeFY(cleaned.fy);
+  } else {
+    cleaned.fy = normalizeFY(getFinancialYear(cleaned.ref, cleaned.date || cleaned.validDate) || getCurrentFY());
+  }
+
+  Object.keys(cleaned).forEach(key => {
+    if (cleaned[key] === undefined) {
+      cleaned[key] = null;
+    }
+  });
+  return cleaned;
+};
+
 const getDynamicPrefix = () => {
   const d = new Date();
   const m = d.getMonth() + 1;
@@ -82,7 +102,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
   const rowsPerPage = 10;
   const [isMobilePreviewOpen, setIsMobilePreviewOpen] = useState(false);
 
-  // --- STRICT FILTER FOR CERTIFICATES ONLY ---
+  // --- STRICT FILTER FOR CERTIFICATES ONLY (NO QUOTATIONS) ---
   const [certificates, setCertificates] = useState(() => {
     try {
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
@@ -472,7 +492,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     });
   };
 
-  // 🟢 WHATSAPP SHARE WITH WHATSapSent SUCCESS ICON FLAG RESTORED
+  // 🟢 CAPACITOR SHARE & CLIPBOARD INTEGRATION
   const handleWhatsAppSend = async (e, cert, type = 'doc') => {
     e.stopPropagation(); 
 
@@ -498,7 +518,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           scaleWrapper.style.transform = 'none';
         }
 
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 300));
 
         const dataUrl = await toJpeg(element, {
           quality: 0.85,
@@ -550,6 +570,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         document.body.style.cursor = 'default';
         setActivePreviewCert(null);
 
+        // 🟢 टेक्स्ट मैसेज को क्लिपबोर्ड में कॉपी करें ताकि WhatsApp पर आसानी से पेस्ट किया जा सके
         try {
           await navigator.clipboard.writeText(msg);
         } catch (clipErr) {
@@ -580,7 +601,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         setActivePreviewCert(null);
         alert(`Could not share PDF. Reason: ${err.message || err}`);
       }
-    }, 600);
+    }, 400);
   };
 
   const executeDocumentAction = async (actionType, elementId, filename) => {
@@ -782,7 +803,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
     const existingCert = certificates.find(c => String(c.id) === String(certId));
     const existingPayments = existingCert ? existingCert.payments || [] : [];
 
-    const certPayload = {
+    const certPayload = sanitizeForCloud({
       id: certId,
       docType: 'certificate',
       vendor: activeFirmObj.name,
@@ -801,7 +822,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
       payments: existingPayments,
       whatsappSent: existingCert ? !!existingCert.whatsappSent : false,
       updatedAt: Date.now()
-    };
+    });
 
     await SyncManager.saveData('ERP_History_v104', 'certificates', certPayload);
     
@@ -842,7 +863,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
         allHistory[idx].payment = paymentForm.method;
       }
 
-      await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+      await SyncManager.saveData('ERP_History_v104', 'certificates', sanitizeForCloud(allHistory[idx]));
       const saved = SyncManager.getLocalData('ERP_History_v104', []);
       setCertificates([...saved.filter(b => b.docType === 'certificate')]);
       setActiveCert(allHistory[idx]);
@@ -865,7 +886,7 @@ export default function Certificate({ selectedFY, initialViewMode }) {
           allHistory[idx].payment = 'CREDIT';
         }
 
-        await SyncManager.saveData('ERP_History_v104', 'certificates', allHistory[idx]);
+        await SyncManager.saveData('ERP_History_v104', 'certificates', sanitizeForCloud(allHistory[idx]));
         const saved = SyncManager.getLocalData('ERP_History_v104', []);
         setCertificates([...saved.filter(b => b.docType === 'certificate')]);
         setActiveCert(allHistory[idx]);

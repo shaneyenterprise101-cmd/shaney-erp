@@ -737,7 +737,7 @@ export default function App() {
               <button 
                 type="submit"
                 className="w-full bg-[#00a67e] text-white py-3.5 rounded-xl font-black text-sm uppercase tracking-widest hover:bg-emerald-600 transition-all shadow-lg active:scale-95 mt-2 cursor-pointer">
-                Login System
+                Login
               </button>
 
               <div className="flex justify-between items-center text-xs font-bold mt-2">
