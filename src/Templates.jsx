@@ -333,8 +333,8 @@ export default function Templates() {
     }
   };
 
-  // 🟢 COMPRESSION FUNCTION (UPDATED FOR BOTH CERTIFICATE & QUOTATION)
-  const compressAndConvertToBase64 = (file, maxWidth = 300, maxHeight = 300) => {
+  // 🟢 FIXED JPEG COMPRESSION TO STRICTLY PREVENT 500 ERROR
+  const compressAndConvertToBase64 = (file, maxWidth = 150, maxHeight = 150) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (uploadEvent) => {
@@ -351,9 +351,12 @@ export default function Templates() {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
-          ctx.clearRect(0, 0, width, height);
+          
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillRect(0, 0, width, height);
+          
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/png', 0.8)); // Compressed output
+          resolve(canvas.toDataURL('image/jpeg', 0.7));
         };
         img.src = uploadEvent.target.result;
       };
@@ -364,7 +367,7 @@ export default function Templates() {
   const handleGraphicFile = async (key, file) => {
     if (!file) return;
     try {
-      const compressedDataUrl = await compressAndConvertToBase64(file, 250, 250); // Strict size control
+      const compressedDataUrl = await compressAndConvertToBase64(file, 150, 150);
       setCurrentDesign(prev => ({
         ...prev,
         graphics: {
