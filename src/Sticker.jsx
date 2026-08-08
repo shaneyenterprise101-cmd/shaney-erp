@@ -145,7 +145,7 @@ export default function Sticker() {
     }
   }, []);
 
-  // Firm-wise design load effect with collective cloud fetch
+  // Firm-wise design & category load effect with local background preservation
   useEffect(() => {
     if (!selectedFirm) return;
     const firm = firms.find(f => f.id === selectedFirm);
@@ -155,6 +155,12 @@ export default function Sticker() {
     }
 
     const fetchAllStickerDesigns = async () => {
+      let localDesign = null;
+      const savedDesign = localStorage.getItem('ERP_Sticker_Design_' + selectedFirm);
+      if (savedDesign) {
+        try { localDesign = JSON.parse(savedDesign); } catch(e){}
+      }
+
       try {
         const res = await fetch(`${BACKEND_URL}/api/data`);
         let d = null;
@@ -165,7 +171,6 @@ export default function Sticker() {
             if (Array.isArray(allData)) {
               cloudDesigns = allData.filter(item => item.docType === 'sticker_design' && String(item.firmId) === String(selectedFirm));
             } else if (allData.settings) {
-              // Fetch collectively and find the matching firm design
               const allSettings = Array.isArray(allData.settings) ? allData.settings : Object.values(allData.settings);
               cloudDesigns = allSettings.filter(item => item && item.docType === 'sticker_design' && String(item.firmId) === String(selectedFirm));
             }
@@ -175,33 +180,30 @@ export default function Sticker() {
           }
         }
 
-        if (!d) {
-          const savedDesign = localStorage.getItem('ERP_Sticker_Design_' + selectedFirm);
-          if (savedDesign) d = JSON.parse(savedDesign);
-        }
+        const activeDesign = d || localDesign;
 
-        if (d) {
-          setPageSize(d.pageSize || 'A6');
-          setCustomW(d.customW || 105);
-          setCustomH(d.customH || 148);
-          setStBg(d.stBg || null);
-          setTblW(d.tblW || 280);
-          setRowH(d.rowH || 5);
-          setCol1(d.col1 || 50);
-          setCol2(d.col2 || 50);
-          setTblX(d.tblX || 20);
-          setTblY(d.tblY || 150);
-          setTableBg(d.tableBg || '#ffffff');
-          setFontL(d.fontL || 'Arial');
-          setSizeL(d.sizeL || 12);
-          setColorL(d.colorL || '#000000');
-          setBoldL(d.boldL || false);
-          setItalicL(d.italicL || false);
-          setFontD(d.fontD || 'Arial');
-          setSizeD(d.sizeD || 12);
-          setColorD(d.colorD || '#d92121');
-          setBoldD(d.boldD || false);
-          setItalicD(d.italicD || false);
+        if (activeDesign) {
+          setPageSize(activeDesign.pageSize || 'A6');
+          setCustomW(activeDesign.customW || 105);
+          setCustomH(activeDesign.customH || 148);
+          setStBg(activeDesign.stBg || (localDesign ? localDesign.stBg : null));
+          setTblW(activeDesign.tblW || 280);
+          setRowH(activeDesign.rowH || 5);
+          setCol1(activeDesign.col1 || 50);
+          setCol2(activeDesign.col2 || 50);
+          setTblX(activeDesign.tblX || 20);
+          setTblY(activeDesign.tblY || 150);
+          setTableBg(activeDesign.tableBg || '#ffffff');
+          setFontL(activeDesign.fontL || 'Arial');
+          setSizeL(activeDesign.sizeL || 12);
+          setColorL(activeDesign.colorL || '#000000');
+          setBoldL(activeDesign.boldL || false);
+          setItalicL(activeDesign.italicL || false);
+          setFontD(activeDesign.fontD || 'Arial');
+          setSizeD(activeDesign.sizeD || 12);
+          setColorD(activeDesign.colorD || '#d92121');
+          setBoldD(activeDesign.boldD || false);
+          setItalicD(activeDesign.italicD || false);
         } else {
           setStBg(null);
           setTblW(280);
@@ -210,17 +212,53 @@ export default function Sticker() {
         }
       } catch (e) {
         console.error("Error loading sticker designs:", e);
+        if (localDesign) {
+          setStBg(localDesign.stBg || null);
+        }
       }
     };
 
     fetchAllStickerDesigns();
   }, [selectedFirm, firms]);
 
+  // 🟢 COMPRESSED BACKGROUND UPLOAD FOR SEAMLESS MULTI-DEVICE CLOUD SYNC
   const handleBgUpload = (e) => {
     const file = e.target.files[0];
     if (!file) return;
+
     const reader = new FileReader();
-    reader.onload = (evt) => setStBg(evt.target.result);
+    reader.onload = (evt) => {
+      const img = new Image();
+      img.src = evt.target.result;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        const MAX_WIDTH = 1200;
+        const MAX_HEIGHT = 1200;
+
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height = Math.round((height * MAX_WIDTH) / width);
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width = Math.round((width * MAX_HEIGHT) / height);
+            height = MAX_HEIGHT;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        setStBg(compressedDataUrl);
+      };
+    };
     reader.readAsDataURL(file);
   };
 
@@ -263,7 +301,7 @@ export default function Sticker() {
     }
   };
 
-  // 🟢 Separate Cloud Save for each Firm Design
+  // 🟢 FIRM-WISE CLOUD SAVE WITH COMPRESSED BACKGROUND IMAGE
   const saveDesign = async () => {
     if (!selectedFirm) return alert('Select a firm first!');
     const currentTimestamp = Date.now();
@@ -277,11 +315,9 @@ export default function Sticker() {
       updatedAt: currentTimestamp
     };
     
-    // Save locally
     localStorage.setItem('ERP_Sticker_Design_' + selectedFirm, JSON.stringify(data));
 
     try {
-      // Send individual firm design to cloud separately
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -294,8 +330,8 @@ export default function Sticker() {
       }
 
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'settings' } }));
-      logActionToBackend(`Saved Sticker Design for firm ID: ${selectedFirm}`);
-      alert('✅ Firm-wise sticker design saved and synced to Cloud successfully!');
+      logActionToBackend(`Saved Sticker Design with background for firm ID: ${selectedFirm}`);
+      alert('✅ Sticker design and background synced to Cloud successfully across all devices!');
     } catch (err) {
       console.error("Cloud sticker save error:", err);
       alert('✅ Saved locally, but cloud sync failed: ' + err.message);
@@ -313,7 +349,6 @@ export default function Sticker() {
     }
   };
 
-  // Multi-Copy Print Function Using Page Breaks
   const handleImagePrint = async () => {
     const element = document.getElementById('printableStickerArea');
     if (!element) return alert('Preview element not found!');
@@ -396,7 +431,6 @@ export default function Sticker() {
     }
   };
 
-  // Dimensions in mm
   let widthMm = 105, heightMm = 148;
   if (pageSize === 'CUSTOM') {
     widthMm = Number(customW) || 105;
@@ -411,7 +445,6 @@ export default function Sticker() {
     widthMm = 210; heightMm = 148;
   }
 
-  // Sticker Content Render Function (Shared)
   const renderStickerContent = () => (
     <div 
       id="printableStickerArea"
@@ -427,7 +460,6 @@ export default function Sticker() {
         backgroundRepeat: 'no-repeat'
       }}
     >
-      {/* Sticker Table */}
       <table 
         className="absolute border-2 border-black"
         style={{
@@ -470,18 +502,15 @@ export default function Sticker() {
       <div className="max-w-7xl mx-auto pb-10">
         <h2 className="text-xl md:text-2xl font-black text-slate-800 uppercase tracking-widest border-b-2 border-slate-200 pb-3 mb-6 flex items-center justify-between gap-2">
           <span className="flex items-center gap-2.5">
-            {/* Sticker Tag SVG Icon */}
             <svg className="w-7 h-7 text-[#00a67e]" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" />
             </svg>
             STICKER DESIGNER
           </span>
-          {/* Mobile Preview Button */}
           <button 
             onClick={() => setPreviewModalOpen(true)}
             className="lg:hidden bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-black uppercase shadow-sm cursor-pointer flex items-center gap-1.5"
           >
-            {/* Eye SVG Icon */}
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
@@ -492,10 +521,8 @@ export default function Sticker() {
 
         <div className="flex flex-col lg:flex-row gap-6 items-start w-full">
           
-          {/* LEFT CONTROL PANEL */}
           <div className="w-full lg:w-[450px] shrink-0 bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-4 lg:max-h-[85vh] lg:overflow-y-auto custom-scrollbar">
             
-            {/* 1. Firm & Page Setup */}
             <div className="bg-indigo-50/60 p-3.5 rounded-xl border border-indigo-100 flex flex-col gap-2">
               <label className="block text-[11px] font-black uppercase text-indigo-800 tracking-widest">1. Firm & Page Setup</label>
               <select value={selectedFirm} onChange={(e) => setSelectedFirm(e.target.value)} className="pro-input w-full text-xs font-bold bg-white">
@@ -522,7 +549,6 @@ export default function Sticker() {
               {stBg && <button onClick={() => setStBg(null)} className="text-[10px] text-red-500 font-bold hover:underline block text-left">✕ Remove Background</button>}
             </div>
 
-            {/* 2. Sticker Data */}
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
               <label className="block text-[11px] font-black uppercase mb-2 text-slate-700 tracking-widest">2. Sticker Data</label>
               <div className="grid grid-cols-2 gap-3">
@@ -551,7 +577,6 @@ export default function Sticker() {
               </div>
             </div>
 
-            {/* 3. Table Layout & Style */}
             <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200">
               <label className="block text-[11px] font-black uppercase mb-2 text-slate-700 tracking-widest">3. Table Layout & Style</label>
               
@@ -569,7 +594,6 @@ export default function Sticker() {
                 </div>
               </div>
 
-              {/* A. Label Text Style */}
               <label className="block text-[9px] font-bold uppercase mt-2 mb-1 text-slate-600 bg-slate-200/70 p-1.5 rounded">A. Label Text Style (Type:, Kg:)</label>
               <div className="flex items-center gap-1 mb-2">
                 <select value={fontL} onChange={(e) => setFontL(e.target.value)} className="pro-input text-[10px] w-24 bg-white py-1.5">
@@ -597,7 +621,6 @@ export default function Sticker() {
                 </button>
               </div>
 
-              {/* B. Imported Data Style */}
               <label className="block text-[9px] font-bold uppercase mt-2 mb-1 text-blue-700 bg-blue-100/70 p-1.5 rounded">B. Imported Data Style (Values)</label>
               <div className="flex items-center gap-1 mb-2">
                 <select value={fontD} onChange={(e) => setFontD(e.target.value)} className="pro-input text-[10px] w-24 bg-white py-1.5">
@@ -636,7 +659,6 @@ export default function Sticker() {
             </div>
 
             <button onClick={saveDesign} className="w-full bg-blue-600 text-white py-2.5 rounded-xl font-black uppercase text-xs shadow-md hover:bg-blue-700 transition-all cursor-pointer flex items-center justify-center gap-1.5">
-              {/* Save SVG Icon */}
               <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2H3m-1 4l-3 3m0 0l-3-3m3 3V4" /></svg>
               Save Design
             </button>
@@ -646,28 +668,23 @@ export default function Sticker() {
                 <label className="text-[9px] font-bold text-center text-emerald-700 uppercase mb-0.5">Qty</label>
                 <input type="number" value={copies} onChange={(e) => setCopies(e.target.value)} min="1" className="pro-input w-full text-center font-black border-2 border-emerald-500 text-emerald-700 bg-emerald-50" style={{ height: '42px' }} />
               </div>
-              {/* 🟢 MULTI-COPY PRINT BUTTON */}
               <button onClick={handleImagePrint} className="flex-grow bg-[#00a67e] text-white rounded-xl font-black uppercase tracking-widest shadow-md hover:bg-emerald-600 transition-all flex items-center justify-center gap-2 text-xs cursor-pointer" style={{ height: '42px' }} title="Print">
-                {/* Printer SVG Icon */}
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
                 Print
               </button>
             </div>
           </div>
 
-          {/* RIGHT PREVIEW CANVAS (Desktop View) */}
           <div className="hidden lg:flex flex-grow bg-slate-100 p-8 border-2 border-dashed border-slate-300 rounded-2xl min-h-[500px] justify-center items-start overflow-auto w-full">
             {renderStickerContent()}
           </div>
 
         </div>
 
-        {/* 🟢 FULL SCREEN FIXED MOBILE PREVIEW MODAL / DRAWER */}
         {previewModalOpen && (
           <div className="fixed inset-0 bg-slate-950/85 z-[999999] flex flex-col items-center justify-center backdrop-blur-md p-2 md:p-6">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl flex flex-col h-[92vh] overflow-hidden animate-[fadeIn_0.2s_ease-out]">
               
-              {/* Modal Header */}
               <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-[#00a67e] text-white rounded-t-2xl shrink-0">
                 <h3 className="font-black uppercase text-xs md:text-sm flex items-center gap-2">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
@@ -676,7 +693,6 @@ export default function Sticker() {
                 <button type="button" onClick={() => setPreviewModalOpen(false)} className="text-white hover:text-red-200 font-bold text-3xl leading-none cursor-pointer">&times;</button>
               </div>
               
-              {/* Modal Body with Improved Scroll Alignment */}
               <div className="flex-1 overflow-auto bg-slate-100 p-6 custom-scrollbar flex">
                 <div className="m-auto flex items-center justify-center p-4">
                   {renderStickerContent()}
