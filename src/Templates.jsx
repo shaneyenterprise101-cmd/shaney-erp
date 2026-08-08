@@ -335,7 +335,8 @@ export default function Templates() {
     }
   };
 
-  const compressAndConvertToBase64 = (file, maxWidth = 300, maxHeight = 300) => {
+  // 🟢 Updated Compression Function for Transparency and High Quality
+  const compressAndConvertToBase64 = (file, maxWidth = 800, maxHeight = 800) => {
     return new Promise((resolve) => {
       const reader = new FileReader();
       reader.onload = (uploadEvent) => {
@@ -344,17 +345,24 @@ export default function Templates() {
           const canvas = document.createElement('canvas');
           let width = img.width;
           let height = img.height;
+          
+          // Only resize if it exceeds max boundaries, otherwise keep original HD resolution
           if (width > height) {
             if (width > maxWidth) { height *= maxWidth / width; width = maxWidth; }
           } else {
             if (height > maxHeight) { width *= maxHeight / height; height = maxHeight; }
           }
+          
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          
+          // Clear background strictly to ensure transparency is kept
           ctx.clearRect(0, 0, width, height);
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/png'));
+          
+          // Use image/webp with 0.98 quality to preserve transparency and high clarity
+          resolve(canvas.toDataURL('image/webp', 0.98));
         };
         img.src = uploadEvent.target.result;
       };
@@ -365,7 +373,8 @@ export default function Templates() {
   const handleGraphicFile = async (key, file) => {
     if (!file) return;
     try {
-      const compressedDataUrl = await compressAndConvertToBase64(file, 300, 300);
+      // 🟢 Pass higher limits to preserve logo/stamp HD clarity
+      const compressedDataUrl = await compressAndConvertToBase64(file, 800, 800);
       setCurrentDesign(prev => ({
         ...prev,
         graphics: {
@@ -402,7 +411,8 @@ export default function Templates() {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      const compressedDataUrl = await compressAndConvertToBase64(file, 400, 600);
+      // 🟢 Higher limits for A4 Background to preserve HD clarity
+      const compressedDataUrl = await compressAndConvertToBase64(file, 1200, 1600);
       setCurrentDesign(prev => ({ ...prev, a4BgUrl: compressedDataUrl }));
     } catch (err) {
       console.error("Background compression error:", err);
@@ -486,7 +496,7 @@ export default function Templates() {
     let html = "";
     switch (v.headerTemp) {
         case 'h-solid-block': html = `<div class="flex justify-center items-center w-full p-6 rounded-2xl mb-2 text-center" style="background: ${cColor}; color: white;"><div><div class="uppercase">${nameStr}</div>${addrStr}</div></div>`; break;
-        case 'h-dark-mode': html = `<div class="flex justify-start items-center w-full p-6 bg-slate-900 rounded-xl mb-2 border-b-4" style="border-color: ${cColor}; color: white;"><div><div>${nameStr}</div>${addrStr}</div></div></div>`; break;
+        case 'h-dark-mode': html = `<div class="flex justify-start items-center w-full p-6 bg-slate-900 rounded-xl mb-2 border-b-4" style="border-color: ${cColor}; color: white;"><div><div>${nameStr}</div>${addrStr}</div></div>`; break;
         case 'h-ultimate-pro': html = `<div class="flex justify-start items-center w-full pb-6 mb-2 border-b border-slate-200" style="color: ${hC};"><div><div style="border-left: 6px solid ${cColor}; padding-left: 15px;">${nameStr}</div><div style="padding-left: 15px;">${addrStr}</div></div></div>`; break;
         case 'h-modern-right': html = `<div class="flex flex-col items-end w-full pb-4 mb-2 border-b border-slate-300" style="color: ${hC};"><div class="text-right">${nameStr}</div><div class="text-right">${addrStr}</div></div>`; break;
         case 'h-elegant-line': html = `<div class="flex justify-start items-end w-full pb-3 mb-2 relative" style="color: ${hC};"><div><div>${nameStr}</div><div style="width: 80px; height: 5px; background: ${cColor}; margin-top: 8px; border-radius: 3px;"></div><div class="mt-3">${addrStr}</div></div></div>`; break;

@@ -717,17 +717,14 @@ export default function Quotation({ selectedFY, initialViewMode }) {
     }
     
     const finishSave = () => {
-      setFormData({ ...formData, client: '', address: '', contact: '' });
-      const firmGst = activeFirmObj.gstRate !== undefined ? Number(activeFirmObj.gstRate) : 18;
-      setItems([{ id: Date.now(), desc: '', hsn: '8424', qty: 1, rate: 0, gst: firmGst, amount: 0 }]);
+      // 🟢 KEEP FORM OPEN WITH SAME DATA FOR QUICK DUPLICATION
       setEditingQuoteId(null);
-      setViewMode('list');
     };
 
     if (directAction === 'print') {
       setTimeout(() => { executeDocumentAction('print', 'create-quote-print-area', formData.serialNo); finishSave(); }, 100);
     } else {
-      alert(editingQuoteId ? '✅ Quotation Updated & Synced to Cloud!' : '✅ Quotation Saved & Synced to Cloud!');
+      alert(editingQuoteId ? '✅ Quotation Updated & Synced to Cloud!\n\nForm is still open. You can change Firm/Rates to save another copy.' : '✅ Quotation Saved & Synced to Cloud!\n\nForm is still open. You can change Firm/Rates to save another copy.');
       finishSave();
     }
   };
@@ -1092,10 +1089,11 @@ export default function Quotation({ selectedFY, initialViewMode }) {
 
       return (
           <div id={containerId} className="bg-white shadow-2xl relative w-[794px] h-auto min-h-[1123px] overflow-hidden flex flex-col box-border z-0 p-8 md:p-12">
+            {/* 🟢 NEW CSS FOR TEXT WRAPPING ADDED HERE */}
             <style dangerouslySetInnerHTML={{__html:`
                 .table-base th { padding: 12px 10px; text-transform: uppercase; font-size: ${thSize}px; font-weight: 800; text-align: center; border-bottom: 2px solid ${tCol}; }
                 .table-base td { padding: 12px 10px; text-align: center; border-bottom: 1px solid #f1f5f9; }
-                .product-desc-cell { text-align: left !important; font-weight: 700; color: #0f172a; }
+                .product-desc-cell { text-align: left !important; font-weight: 700; color: #0f172a; white-space: pre-wrap; word-break: break-word; overflow-wrap: break-word; line-height: 1.5; }
                 .product-desc-header { text-align: left !important; }
                 .table-modern th { background: transparent; color: ${tCol}; }
                 .table-striped tbody tr:nth-child(even) { background-color: #f8fafc; }
@@ -1144,7 +1142,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                         {(itemsData || items).map((it, idx) => (
                             <tr key={it.id || idx}>
                                 <td>{idx + 1}</td>
-                                <td className="product-desc-cell">{it.desc || '-'}</td>
+                                <td className="product-desc-cell break-words whitespace-pre-wrap">{it.desc || '-'}</td>
                                 <td>{it.hsn || '-'}</td>
                                 <td>{it.gst !== undefined ? it.gst + '%' : '18%'}</td>
                                 <td>{it.qty || 0}</td>
@@ -1715,7 +1713,7 @@ export default function Quotation({ selectedFY, initialViewMode }) {
                         </svg>
                         WA
                       </button>
-                      <button onClick={(e) => handleDeleteHistory(e, q.id)} className="bg-red-50 hover:bg-red-100 text-red-600 px-2.5 py-2 rounded-lg text-[10px] font-black uppercase border border-red-200 transition-colors flex items-center justify-center gap-1">
+                      <button onClick={(e) => handleDeleteHistory(e, q.id)} className="flex-1 bg-red-50 hover:bg-red-100 text-red-600 py-2 px-1 rounded-lg text-[10px] font-black uppercase border border-red-200 transition-colors text-center flex items-center justify-center gap-1">
                         <svg className="w-3 h-3 fill-current shrink-0" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>
                         Del
                       </button>

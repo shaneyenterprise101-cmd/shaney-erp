@@ -243,6 +243,113 @@ export default function Report({ selectedFY }) {
     event.target.value = '';
   };
 
+  // 🟢 NEW EXPORTS: Customer, Product & Complete CRM Export
+  const exportCustomersExcel = () => {
+    try {
+      const customers = JSON.parse(localStorage.getItem('ERP_Customers_v104') || '[]');
+      if (customers.length === 0) return alert('No customer records found.');
+      const rows = customers.map(c => ({
+        'Client Name': c.name || '',
+        'Address': c.address || '',
+        'Village': c.village || '',
+        'Taluka': c.taluka || '',
+        'District': c.district || '',
+        'State': c.state || '',
+        'Pincode': c.pincode || '',
+        'Contacts': (c.contacts || []).map(con => `${con.person}: ${con.mobile} (${con.type})`).join(' | ')
+      }));
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Customers");
+      XLSX.writeFile(wb, `Customer_Directory_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+      logActionToBackend("Exported customer directory report");
+      alert('Customer Directory Exported Successfully!');
+    } catch(e) { alert('Customer Export failed: ' + e.message); }
+  };
+
+  const exportProductsExcel = () => {
+    try {
+      const products = JSON.parse(localStorage.getItem('ERP_Products_v104') || '[]');
+      const firmsList = JSON.parse(localStorage.getItem('ERP_Companies_v104') || '[]').filter(f => f.type === 'quotation');
+      const validProds = products.filter(item => item && item.description && item.id !== 'products');
+      if (validProds.length === 0) return alert('No product records found.');
+      
+      const rows = validProds.map(p => {
+        let rObj = {
+          'Description': p.description || '',
+          'HSN Code': p.hsn || ''
+        };
+        firmsList.forEach(f => {
+          rObj[`Rate (${f.name})`] = (p.rates && p.rates[f.id]) ? p.rates[f.id] : '';
+        });
+        return rObj;
+      });
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Inventory");
+      XLSX.writeFile(wb, `Inventory_Products_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+      logActionToBackend("Exported inventory products report");
+      alert('Inventory Products Exported Successfully!');
+    } catch(e) { alert('Product Export failed: ' + e.message); }
+  };
+
+  const exportCrmReport = () => {
+    try {
+      let crmData = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        let key = localStorage.key(i);
+        if (key && key.includes('CRM')) {
+          try {
+            const parsed = JSON.parse(localStorage.getItem(key));
+            if (Array.isArray(parsed)) {
+              crmData = parsed;
+              break;
+            } else if (parsed && typeof parsed === 'object') {
+              const values = Object.values(parsed);
+              if (values.some(v => Array.isArray(v))) {
+                crmData = values.find(v => Array.isArray(v)) || [];
+                break;
+              }
+            }
+          } catch(e) {}
+        }
+      }
+
+      if (crmData.length === 0) {
+        return alert('No CRM data found in local storage.');
+      }
+
+      const rows = crmData.map((lead, idx) => {
+        const actionsStr = Array.isArray(lead.actions) ? lead.actions.map(a => `${a.date || ''}: ${a.text || a.action || ''}`).join(' | ') : (lead.action || lead.lastAction || '');
+        const whatsappStr = Array.isArray(lead.whatsappLogs || lead.whatsapp) ? (lead.whatsappLogs || lead.whatsapp).map(w => `${w.date || ''}: ${w.message || w.text || ''}`).join(' | ') : '';
+        const notesStr = Array.isArray(lead.notes) ? lead.notes.map(n => `${n.date || ''}: ${n.text || n.note || ''}`).join(' | ') : (lead.notes || lead.note || '');
+        
+        return {
+          '#ID#': lead.id || idx + 1,
+          'Party Name': lead.partyName || lead.name || lead.party || '',
+          'District': lead.district || '',
+          'Taluka': lead.taluka || '',
+          'Status': lead.status || lead.leadStatus || '',
+          'Value / Info': lead.value || lead.amount || lead.info || '',
+          'Contact Number': lead.mobile || lead.phone || lead.contact || '',
+          'Actions History': actionsStr,
+          'WhatsApp Logs': whatsappStr,
+          'Notes': notesStr,
+          'Date / Timestamp': lead.date ? new Date(lead.date).toLocaleDateString() : (lead.updatedAt ? new Date(lead.updatedAt).toLocaleDateString() : '')
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(rows);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "CRM_Report");
+      XLSX.writeFile(wb, `CRM_Complete_Report_${new Date().toISOString().slice(0,10)}.xlsx`);
+      logActionToBackend("Exported complete CRM report with actions, WhatsApp, notes, and dates");
+      alert('CRM Complete Report Exported Successfully!');
+    } catch(e) {
+      alert('CRM Export failed: ' + e.message);
+    }
+  };
+
   const handleFileSelectForPreview = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -726,6 +833,59 @@ export default function Report({ selectedFY }) {
           <p className="text-slate-400 text-xs font-bold mt-2">Please wait while maintaining safe Read/Write performance.</p>
         </div>
       )}
+
+      {/* 🟢 NEW MASTER DATA EXPORTS SECTION */}
+      <div className="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-slate-200">
+        <h2 className="text-xl font-black text-slate-800 mb-1">Master Data Excel Exports</h2>
+        <p className="text-xs text-slate-500 mb-6 font-bold uppercase tracking-widest">Download Customers, Products & Complete CRM Reports</p>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Customer Export */}
+          <div className="border border-emerald-100 rounded-xl p-5 bg-emerald-50/30 flex flex-col justify-between">
+            <div>
+              <div className="w-10 h-10 bg-emerald-100 text-emerald-600 rounded-lg flex items-center justify-center text-xl mb-3 shadow-sm">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
+              </div>
+              <h3 className="font-black text-slate-700 mb-1 text-sm uppercase">Customer Directory</h3>
+              <p className="text-[11px] text-slate-500 mb-4 font-bold">Export all client names, addresses & contacts.</p>
+            </div>
+            <button type="button" onClick={exportCustomersExcel} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-3 rounded-xl font-black text-xs uppercase shadow-md transition-colors active:scale-95 cursor-pointer flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              Export Customers
+            </button>
+          </div>
+
+          {/* Product Export */}
+          <div className="border border-blue-100 rounded-xl p-5 bg-blue-50/30 flex flex-col justify-between">
+            <div>
+              <div className="w-10 h-10 bg-blue-100 text-blue-600 rounded-lg flex items-center justify-center text-xl mb-3 shadow-sm">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+              </div>
+              <h3 className="font-black text-slate-700 mb-1 text-sm uppercase">Inventory Products</h3>
+              <p className="text-[11px] text-slate-500 mb-4 font-bold">Export all items, HSN & firm-wise rates.</p>
+            </div>
+            <button type="button" onClick={exportProductsExcel} className="w-full bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-xl font-black text-xs uppercase shadow-md transition-colors active:scale-95 cursor-pointer flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              Export Products
+            </button>
+          </div>
+
+          {/* CRM Complete Export */}
+          <div className="border border-purple-100 rounded-xl p-5 bg-purple-50/30 flex flex-col justify-between">
+            <div>
+              <div className="w-10 h-10 bg-purple-100 text-purple-600 rounded-lg flex items-center justify-center text-xl mb-3 shadow-sm">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>
+              </div>
+              <h3 className="font-black text-slate-700 mb-1 text-sm uppercase">Complete CRM Report</h3>
+              <p className="text-[11px] text-slate-500 mb-4 font-bold">Export leads, actions, WhatsApp, notes & dates.</p>
+            </div>
+            <button type="button" onClick={exportCrmReport} className="w-full bg-purple-600 hover:bg-purple-700 text-white px-4 py-3 rounded-xl font-black text-xs uppercase shadow-md transition-colors active:scale-95 cursor-pointer flex items-center justify-center gap-2">
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2.2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+              Export CRM Report
+            </button>
+          </div>
+        </div>
+      </div>
 
       <div className="bg-white rounded-2xl shadow-sm p-6 mb-6 border border-slate-200">
         <h2 className="text-xl font-black text-slate-800 mb-1">Data Reports & Smart Cloud Sync</h2>

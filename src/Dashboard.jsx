@@ -23,6 +23,9 @@ export default function Dashboard({ currentUser, setActiveTab }) {
   const [liveFeedLogs, setLiveFeedLogs] = useState([]);
   const [leaderboardData, setLeaderboardData] = useState([]);
   const [currentMonthRevenue, setCurrentMonthRevenue] = useState(0);
+  
+  // 🟢 NEW: State to store Firms data for ID to Name replacement
+  const [firmsData, setFirmsData] = useState([]);
 
   // State for District Click Taluka Modal Breakdown
   const [modalDistrict, setModalDistrict] = useState(null);
@@ -127,6 +130,10 @@ export default function Dashboard({ currentUser, setActiveTab }) {
         let crmData = JSON.parse(localStorage.getItem("ERP_CRM_v9") || "[]");
         const customersData = JSON.parse(localStorage.getItem("ERP_Customers_v104") || "[]");
         
+        // 🟢 NEW: Fetching firms to replace ID with Name in Live Feed
+        const companiesData = JSON.parse(localStorage.getItem("ERP_Companies_v104") || "[]");
+        setFirmsData(companiesData);
+
         // Pull records from SQLite local database if available via Electron IPC
         if (window.require) {
           try {
@@ -511,6 +518,20 @@ export default function Dashboard({ currentUser, setActiveTab }) {
     ? leaderboardData.find(s => s.name === loggedInName.toUpperCase()) || { name: loggedInName.toUpperCase(), totalSales: 0, count: 0 }
     : null;
 
+  // 🟢 NEW HELPER: Replace Firm ID with Firm Name dynamically in UI without saving to DB
+  const formatLogAction = (actionText) => {
+    if (!actionText) return "";
+    let formattedText = String(actionText);
+    if (firmsData && firmsData.length > 0) {
+      firmsData.forEach(firm => {
+        if (firm && firm.id && firm.name) {
+          formattedText = formattedText.split(firm.id).join(firm.name);
+        }
+      });
+    }
+    return formattedText;
+  };
+
   return (
     <div className="tab-content active h-[calc(100vh-65px)] w-full relative bg-slate-100 overflow-y-auto custom-scrollbar p-4 md:p-6 animate-[fadeIn_0.3s_ease-in-out]">
       <div className="max-w-7xl mx-auto pb-10">
@@ -744,9 +765,10 @@ export default function Dashboard({ currentUser, setActiveTab }) {
                 {liveFeedLogs.length === 0 ? (
                   <p className="text-[10px] text-slate-400 italic text-center mt-5">System operating normally on low-bandwidth optimized cache.</p>
                 ) : (
+                  // 🟢 LOG.ACTION ME AB ID KI JAGAH FIRM NAME AAYEGA 
                   liveFeedLogs.map((log, lIdx) => (
                     <div key={lIdx} className="bg-slate-50 border border-slate-100 p-2.5 rounded-xl text-xs flex justify-between items-center">
-                      <span className="font-bold text-slate-800 uppercase">⚡ {log.action}</span>
+                      <span className="font-bold text-slate-800 uppercase">⚡ {formatLogAction(log.action)}</span>
                       <span className="text-[10px] font-mono text-slate-500">{log.time}</span>
                     </div>
                   ))

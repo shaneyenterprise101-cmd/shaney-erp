@@ -149,12 +149,13 @@ export default function App() {
     }
   }, [isPreviewRoute, previewDocId]);
 
+  // 🟢 SESSION STORAGE LOGIC ADDED: App Kill hone par Auto Logout ho jayega
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem("ERP_Active_Role") ? true : false;
+    return sessionStorage.getItem("ERP_Active_Role") ? true : false;
   });
   const [currentUser, setCurrentUser] = useState(() => {
     try {
-      const saved = localStorage.getItem("ERP_Active_Staff_Data");
+      const saved = sessionStorage.getItem("ERP_Active_Staff_Data");
       return saved ? JSON.parse(saved) : { name: 'Shaney Enterprise', role: 'ADMIN' };
     } catch(e) {
       return { name: 'Shaney Enterprise', role: 'ADMIN' };
@@ -259,17 +260,18 @@ export default function App() {
 
   const handleLogout = () => {
     recordCloudLogoutTimestamp();
-    localStorage.removeItem("ERP_Active_Role");
-    localStorage.removeItem("ERP_Active_Staff_Data");
+    sessionStorage.removeItem("ERP_Active_Role");
+    sessionStorage.removeItem("ERP_Active_Staff_Data");
     document.body.classList.remove('staff-logged-in');
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
 
+  // 🟢 SMART INACTIVITY TIMER: Staff (15 Min), Admin (30 Min)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
-    const inactivityTimeout = currentUser.role === 'STAFF' ? 5 * 60 * 1000 : 15 * 60 * 1000;
+    const inactivityTimeout = currentUser.role === 'STAFF' ? 15 * 60 * 1000 : 30 * 60 * 1000;
     let timer;
 
     const resetTimer = () => {
@@ -277,7 +279,7 @@ export default function App() {
       timer = setTimeout(() => {
         recordCloudLogoutTimestamp();
         handleLogout();
-        alert(`Session expired due to ${currentUser.role === 'STAFF' ? '5' : '15'} minutes of inactivity. Please login again.`);
+        alert(`Session expired due to ${currentUser.role === 'STAFF' ? '15' : '30'} minutes of inactivity. Please login again.`);
       }, inactivityTimeout);
     };
 
@@ -365,6 +367,7 @@ export default function App() {
     }
   }, [currentUser]);
 
+  // 🟢 DIRECT CLOUD LOGIN VERIFICATION IMPLEMENTED
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -406,8 +409,8 @@ export default function App() {
         };
 
         setCurrentUser(adminUser);
-        localStorage.setItem("ERP_Active_Role", "ADMIN");
-        localStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
+        sessionStorage.setItem("ERP_Active_Role", "ADMIN");
+        sessionStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
         recordLocalLoginTimestamp("ADMIN");
         postCloudOfficeLog("Successfully Logged In to System", "ADMIN");
         setIsAuthenticated(true);
@@ -415,52 +418,54 @@ export default function App() {
       }
     }
 
-    let currentStaffList = staffList;
-    let foundStaff = currentStaffList.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
+    // 🟢 CLOUD CHECK FIRST
+    try {
+      const res = await fetch(`${BACKEND_URL}/api/data`);
+      if (res.ok) {
+        const allData = await res.json();
+        let cloudStaff = [];
+        if (Array.isArray(allData)) {
+          cloudStaff = allData.filter(item => item.docType === 'staff_account');
+        } else if (allData.staff_accounts) {
+          cloudStaff = allData.staff_accounts;
+        }
 
-    if (!foundStaff) {
-      try {
-        const res = await fetch(`${BACKEND_URL}/api/data`);
-        if (res.ok) {
-          const allData = await res.json();
-          let cloudStaff = [];
-          if (Array.isArray(allData)) {
-            cloudStaff = allData.filter(item => item.docType === 'staff_account');
-          } else if (allData.staff_accounts) {
-            cloudStaff = allData.staff_accounts;
-          }
-          if (cloudStaff.length > 0) {
-            currentStaffList = cloudStaff;
-            setStaffList(cloudStaff);
-            localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cloudStaff));
-            foundStaff = currentStaffList.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
+        if (cloudStaff.length > 0) {
+          setStaffList(cloudStaff);
+          localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cloudStaff));
+          
+          const foundStaff = cloudStaff.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
+          
+          if (foundStaff) {
+            if (String(foundStaff.password) === String(password)) {
+              const staffUserObj = {
+                userid: foundStaff.userid,
+                name: foundStaff.name,
+                role: 'STAFF',
+                phone: foundStaff.phone || '',
+                permissions: foundStaff.permissions || { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true }
+              };
+              setCurrentUser(staffUserObj);
+              sessionStorage.setItem("ERP_Active_Role", "STAFF");
+              sessionStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(staffUserObj));
+              recordLocalLoginTimestamp(staffUserObj.name);
+              postCloudOfficeLog("Successfully Logged In to System", staffUserObj.name);
+              setIsAuthenticated(true);
+              return;
+            } else {
+              setErrorMsg('Incorrect Password for Staff Account!');
+              return;
+            }
           }
         }
-      } catch (err) {
-        console.error("Cloud staff fetch error during login:", err);
-      }
-    }
-
-    if (foundStaff) {
-      if (String(foundStaff.password) === String(password)) {
-        const staffUserObj = {
-          userid: foundStaff.userid,
-          name: foundStaff.name,
-          role: 'STAFF',
-          phone: foundStaff.phone || '',
-          permissions: foundStaff.permissions || { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true }
-        };
-        setCurrentUser(staffUserObj);
-        localStorage.setItem("ERP_Active_Role", "STAFF");
-        localStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(staffUserObj));
-        recordLocalLoginTimestamp(staffUserObj.name);
-        postCloudOfficeLog("Successfully Logged In to System", staffUserObj.name);
-        setIsAuthenticated(true);
-        return;
       } else {
-        setErrorMsg('Incorrect Password for Staff Account!');
+        setErrorMsg('Network error. Could not connect to cloud server.');
         return;
       }
+    } catch (err) {
+      console.error("Cloud login error:", err);
+      setErrorMsg('Failed to connect. Please check your internet connection.');
+      return;
     }
 
     setErrorMsg('Invalid Admin Email or Staff User ID / Password!');
@@ -579,6 +584,7 @@ export default function App() {
   const handleFactoryReset = () => {
     if (confirm('WARNING: This will erase all ERP data and reset the system to factory defaults. Are you sure?')) {
       localStorage.clear();
+      sessionStorage.clear();
       alert('Factory Reset Complete! The page will now reload.');
       window.location.reload();
     }
