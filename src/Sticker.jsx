@@ -145,7 +145,7 @@ export default function Sticker() {
     }
   }, []);
 
-  // Firm-wise design & category load effect (Loads from Cloud / LocalStorage fallback)
+  // Firm-wise design load effect with collective cloud fetch
   useEffect(() => {
     if (!selectedFirm) return;
     const firm = firms.find(f => f.id === selectedFirm);
@@ -154,7 +154,7 @@ export default function Sticker() {
       setCapacities(firm.capacities || ['2Kg', '4.5Kg', '6Kg', '9Kg']);
     }
 
-    const fetchStickerDesign = async () => {
+    const fetchAllStickerDesigns = async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/api/data`);
         let d = null;
@@ -164,8 +164,10 @@ export default function Sticker() {
             let cloudDesigns = [];
             if (Array.isArray(allData)) {
               cloudDesigns = allData.filter(item => item.docType === 'sticker_design' && String(item.firmId) === String(selectedFirm));
-            } else if (allData.sticker_designs) {
-              cloudDesigns = allData.sticker_designs.filter(item => String(item.firmId) === String(selectedFirm));
+            } else if (allData.settings) {
+              // Fetch collectively and find the matching firm design
+              const allSettings = Array.isArray(allData.settings) ? allData.settings : Object.values(allData.settings);
+              cloudDesigns = allSettings.filter(item => item && item.docType === 'sticker_design' && String(item.firmId) === String(selectedFirm));
             }
             if (cloudDesigns.length > 0) {
               d = cloudDesigns[0];
@@ -202,13 +204,16 @@ export default function Sticker() {
           setItalicD(d.italicD || false);
         } else {
           setStBg(null);
+          setTblW(280);
+          setTblX(20);
+          setTblY(150);
         }
       } catch (e) {
-        console.error("Error loading sticker design:", e);
+        console.error("Error loading sticker designs:", e);
       }
     };
 
-    fetchStickerDesign();
+    fetchAllStickerDesigns();
   }, [selectedFirm, firms]);
 
   const handleBgUpload = (e) => {
@@ -258,36 +263,39 @@ export default function Sticker() {
     }
   };
 
-  // 🟢 UPDATED WITH SQLITE IPC AND EXACT TIMESTAMP FOR DELTA SYNC
+  // 🟢 Separate Cloud Save for each Firm Design
   const saveDesign = async () => {
     if (!selectedFirm) return alert('Select a firm first!');
     const currentTimestamp = Date.now();
+    
     const data = {
       id: 'sticker_design_' + selectedFirm,
       docType: 'sticker_design',
       firmId: selectedFirm,
       pageSize, customW, customH, stBg, tblW, rowH, col1, col2, tblX, tblY, tableBg,
       fontL, sizeL, colorL, boldL, italicL, fontD, sizeD, colorD, boldD, italicD,
-      updatedAt: currentTimestamp // 🟢 Exact Timestamp
+      updatedAt: currentTimestamp
     };
     
     // Save locally
     localStorage.setItem('ERP_Sticker_Design_' + selectedFirm, JSON.stringify(data));
 
     try {
-      // Save to Cloud & SQLite IPC
+      // Send individual firm design to cloud separately
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'sticker_designs', id: String(selectedFirm), data: sanitizeForCloud(data) })
+        body: JSON.stringify({ type: 'settings', id: String(data.id), data: sanitizeForCloud(data) })
       });
+
       if (window.require) {
         const { ipcRenderer } = window.require('electron');
         if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', data);
       }
+
       window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'settings' } }));
       logActionToBackend(`Saved Sticker Design for firm ID: ${selectedFirm}`);
-      alert('✅ Sticker design saved and synced to Cloud successfully!');
+      alert('✅ Firm-wise sticker design saved and synced to Cloud successfully!');
     } catch (err) {
       console.error("Cloud sticker save error:", err);
       alert('✅ Saved locally, but cloud sync failed: ' + err.message);
