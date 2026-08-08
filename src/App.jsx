@@ -34,6 +34,53 @@ const normalizeFY = (fyStr) => {
   return `F.Y. ${clean}`;
 };
 
+// 🟢 SMART CLOUD EXTRACTOR: Overcomes backend append bugs & purges duplicates completely
+const extractStaffFromCloud = (allData) => {
+  try {
+    let extracted = [];
+    let individualItems = [];
+    
+    if (Array.isArray(allData)) {
+      const masterItem = allData.find(i => String(i.id) === 'staff_accounts');
+      if (masterItem && Array.isArray(masterItem.data)) {
+        extracted = masterItem.data;
+      }
+      individualItems = allData.filter(i => i.docType === 'staff_account');
+    } else if (allData && typeof allData === 'object') {
+      if (allData.staff_accounts) {
+        individualItems = Array.isArray(allData.staff_accounts) ? allData.staff_accounts : (allData.staff_accounts.data || []);
+      }
+      if (allData.settings) {
+        const settingsArr = Array.isArray(allData.settings) ? allData.settings : Object.values(allData.settings);
+        const masterItem = settingsArr.find(i => String(i.id) === 'staff_accounts');
+        if (masterItem && Array.isArray(masterItem.data)) {
+          extracted = masterItem.data;
+        }
+      }
+    }
+
+    const combined = [...extracted, ...individualItems];
+
+    const uniqueMap = new Map();
+    
+    combined.forEach(s => {
+      if (s && s.userid && s.deleted !== true) {
+        uniqueMap.set(String(s.userid).toLowerCase(), s);
+      }
+    });
+
+    combined.forEach(s => {
+      if (s && s.userid && s.deleted === true) {
+        uniqueMap.delete(String(s.userid).toLowerCase());
+      }
+    });
+
+    return Array.from(uniqueMap.values());
+  } catch (e) {
+    return [];
+  }
+};
+
 export default function App() {
   const path = window.location.pathname;
   const isPreviewRoute = path.includes('/preview/');
@@ -149,13 +196,13 @@ export default function App() {
     }
   }, [isPreviewRoute, previewDocId]);
 
-  // 🟢 SESSION STORAGE LOGIC ADDED: App Kill hone par Auto Logout ho jayega
+  // 🟢 PERSISTENT LOCAL STORAGE LOGIC: Prevents logout on page refresh (Fixed from sessionStorage)
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return sessionStorage.getItem("ERP_Active_Role") ? true : false;
+    return localStorage.getItem("ERP_Active_Role") ? true : false;
   });
   const [currentUser, setCurrentUser] = useState(() => {
     try {
-      const saved = sessionStorage.getItem("ERP_Active_Staff_Data");
+      const saved = localStorage.getItem("ERP_Active_Staff_Data");
       return saved ? JSON.parse(saved) : { name: 'Shaney Enterprise', role: 'ADMIN' };
     } catch(e) {
       return { name: 'Shaney Enterprise', role: 'ADMIN' };
@@ -195,8 +242,20 @@ export default function App() {
   const [staffList, setStaffList] = useState(() => {
     try {
       const saved = localStorage.getItem('ERP_Staff_Accounts_v1');
-      return saved ? JSON.parse(saved) : [];
-    } catch(e) { return []; }
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          const uniqueMap = new Map();
+          parsed.forEach(s => {
+            if (s && s.userid && !s.deleted) uniqueMap.set(String(s.userid).toLowerCase(), s);
+          });
+          const cleanStaff = Array.from(uniqueMap.values());
+          localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cleanStaff));
+          return cleanStaff;
+        }
+      }
+    } catch(e) {}
+    return [];
   });
 
   const postCloudOfficeLog = async (actionText, staffName) => {
@@ -260,14 +319,13 @@ export default function App() {
 
   const handleLogout = () => {
     recordCloudLogoutTimestamp();
-    sessionStorage.removeItem("ERP_Active_Role");
-    sessionStorage.removeItem("ERP_Active_Staff_Data");
+    localStorage.removeItem("ERP_Active_Role");
+    localStorage.removeItem("ERP_Active_Staff_Data");
     document.body.classList.remove('staff-logged-in');
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
 
-  // 🟢 SMART INACTIVITY TIMER: Staff (15 Min), Admin (30 Min)
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
@@ -302,15 +360,10 @@ export default function App() {
         const res = await fetch(`${BACKEND_URL}/api/data`);
         if (res.ok) {
           const allData = await res.json();
-          let cloudStaff = [];
-          if (Array.isArray(allData)) {
-            cloudStaff = allData.filter(item => item.docType === 'staff_account');
-          } else if (allData.staff_accounts) {
-            cloudStaff = allData.staff_accounts;
-          }
-          if (cloudStaff.length > 0) {
-            setStaffList(cloudStaff);
-            localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cloudStaff));
+          const cleanCloudStaff = extractStaffFromCloud(allData);
+          if (cleanCloudStaff.length > 0) {
+            setStaffList(cleanCloudStaff);
+            localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cleanCloudStaff));
           }
         }
       } catch (err) {
@@ -367,7 +420,6 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // 🟢 DIRECT CLOUD LOGIN VERIFICATION IMPLEMENTED
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     setErrorMsg('');
@@ -409,8 +461,8 @@ export default function App() {
         };
 
         setCurrentUser(adminUser);
-        sessionStorage.setItem("ERP_Active_Role", "ADMIN");
-        sessionStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
+        localStorage.setItem("ERP_Active_Role", "ADMIN");
+        localStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
         recordLocalLoginTimestamp("ADMIN");
         postCloudOfficeLog("Successfully Logged In to System", "ADMIN");
         setIsAuthenticated(true);
@@ -418,23 +470,17 @@ export default function App() {
       }
     }
 
-    // 🟢 CLOUD CHECK FIRST
     try {
       const res = await fetch(`${BACKEND_URL}/api/data`);
       if (res.ok) {
         const allData = await res.json();
-        let cloudStaff = [];
-        if (Array.isArray(allData)) {
-          cloudStaff = allData.filter(item => item.docType === 'staff_account');
-        } else if (allData.staff_accounts) {
-          cloudStaff = allData.staff_accounts;
-        }
+        const cleanCloudStaff = extractStaffFromCloud(allData);
 
-        if (cloudStaff.length > 0) {
-          setStaffList(cloudStaff);
-          localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cloudStaff));
+        if (cleanCloudStaff.length > 0) {
+          setStaffList(cleanCloudStaff);
+          localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cleanCloudStaff));
           
-          const foundStaff = cloudStaff.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
+          const foundStaff = cleanCloudStaff.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
           
           if (foundStaff) {
             if (String(foundStaff.password) === String(password)) {
@@ -446,8 +492,8 @@ export default function App() {
                 permissions: foundStaff.permissions || { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true }
               };
               setCurrentUser(staffUserObj);
-              sessionStorage.setItem("ERP_Active_Role", "STAFF");
-              sessionStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(staffUserObj));
+              localStorage.setItem("ERP_Active_Role", "STAFF");
+              localStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(staffUserObj));
               recordLocalLoginTimestamp(staffUserObj.name);
               postCloudOfficeLog("Successfully Logged In to System", staffUserObj.name);
               setIsAuthenticated(true);
@@ -520,34 +566,40 @@ export default function App() {
     const formattedUserId = newStaffForm.userid.trim().toLowerCase();
     
     let targetStaffObj = null;
-    let updatedStaffList = [];
+    let updatedStaffList = [...staffList];
 
     if (editingStaffId !== null) {
-      targetStaffObj = { ...newStaffForm, userid: editingStaffId, role: 'STAFF', docType: 'staff_account', updatedAt: Date.now() };
-      updatedStaffList = staffList.map(s => s.userid === editingStaffId ? targetStaffObj : s);
+      targetStaffObj = { ...newStaffForm, userid: formattedUserId, role: 'STAFF', docType: 'staff_account', updatedAt: Date.now() };
+      updatedStaffList = updatedStaffList.map(s => String(s.userid).toLowerCase() === String(editingStaffId).toLowerCase() ? targetStaffObj : s);
       setEditingStaffId(null);
     } else {
-      if (staffList.some(s => s.userid.toLowerCase() === formattedUserId)) {
+      if (updatedStaffList.some(s => String(s.userid).toLowerCase() === formattedUserId)) {
         alert('This User ID already exists!');
         return;
       }
       targetStaffObj = { ...newStaffForm, userid: formattedUserId, role: 'STAFF', docType: 'staff_account', updatedAt: Date.now() };
-      updatedStaffList = [...staffList, targetStaffObj];
+      updatedStaffList.push(targetStaffObj);
     }
 
-    setStaffList(updatedStaffList);
-    localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(updatedStaffList));
+    const uniqueMap = new Map();
+    updatedStaffList.forEach(s => {
+      if (s && s.userid && !s.deleted) uniqueMap.set(String(s.userid).toLowerCase(), s);
+    });
+    const finalCleanList = Array.from(uniqueMap.values());
+
+    setStaffList(finalCleanList);
+    localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(finalCleanList));
     
-    const simpleNames = updatedStaffList.map(s => s.name.toUpperCase());
+    const simpleNames = finalCleanList.map(s => s.name.toUpperCase());
     localStorage.setItem('ERP_StaffList', JSON.stringify(simpleNames));
 
     try {
       await fetch(`${BACKEND_URL}/api/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'staff_accounts', id: String(targetStaffObj.userid), data: targetStaffObj })
+        body: JSON.stringify({ type: 'settings', id: 'staff_accounts', data: finalCleanList })
       });
-      alert('Staff Account Saved to Cloud!');
+      alert('✅ Staff Account Saved & Synced to Cloud!');
     } catch (err) {
       console.error("Cloud staff save error:", err);
     }
@@ -566,18 +618,42 @@ export default function App() {
     });
   };
 
-  const handleDeleteStaff = async (uId) => {
+  // 🟢 PERMANENT FORCE DELETION LOGIC FOR CLOUD DB
+  const handleDeleteStaff = async (e, uId) => {
+    e.stopPropagation(); 
     if (confirm('Are you sure you want to delete this staff account?')) {
-      const updated = staffList.filter(s => s.userid !== uId);
-      setStaffList(updated);
-      localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(updated));
+      const cleanList = staffList.filter(s => String(s.userid).toLowerCase() !== String(uId).toLowerCase());
+
+      setStaffList(cleanList);
+      localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cleanList));
+
+      const simpleNames = cleanList.map(s => s.name.toUpperCase());
+      localStorage.setItem('ERP_StaffList', JSON.stringify(simpleNames));
 
       try {
-        await fetch(`${BACKEND_URL}/api/data/${uId}`, { method: 'DELETE' });
+        // Individual fallback delete
+        fetch(`${BACKEND_URL}/api/data/${encodeURIComponent(uId)}`, { method: 'DELETE' }).catch(()=>{});
+        
+        // Force Overwrite the DynamoDB array
+        await fetch(`${BACKEND_URL}/api/data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            type: 'settings', 
+            id: 'staff_accounts', 
+            data: cleanList 
+          })
+        });
+
+        if (window.require) {
+          const { ipcRenderer } = window.require('electron');
+          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id: uId, userid: uId, docType: 'staff_account', deleted: true, updatedAt: Date.now() });
+        }
       } catch (err) {
         console.error("Cloud staff delete error:", err);
       }
-      alert('Staff Account Deleted Successfully!');
+
+      alert('✅ Staff Account Deleted Successfully from Local & Cloud!');
     }
   };
 
@@ -603,7 +679,7 @@ export default function App() {
     { id: 'report', label: 'Report', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/></svg>, show: !isStaff || perms.Export !== false },
     { id: 'crm', label: 'CRM', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>, show: !isStaff || perms.CRM !== false },
     { id: 'envelope', label: 'Envelope', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>, show: true },
-    { id: 'sticker', label: 'Sticker', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>, show: true },
+    { id: 'sticker', label: 'Sticker', icon: <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>, show: true },
   ].filter(t => t.show);
 
   if (isPreviewRoute) {
@@ -677,17 +753,16 @@ export default function App() {
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-slate-950 z-0"></div>
         <div className="absolute inset-0 bg-[radial-gradient(#00a67e_1px,transparent_1px)] [background-size:24px_24px] opacity-10 z-0"></div>
 
-        {/* 🟢 विजिटिंग कार्ड हटाकर यहाँ असली लोगो सेट कर दिया गया है */}
         <div className="w-full lg:w-1/2 flex items-center justify-center relative z-10 max-w-lg">
-  <div className="group relative w-full bg-slate-900/80 backdrop-blur-xl p-4 sm:p-6 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/30 overflow-hidden flex items-center justify-center">
-    <img 
-      src={logoImage} 
-      alt="Company Logo" 
-      className="w-full h-auto object-contain rounded-2xl transition-transform duration-500 ease-in-out group-hover:scale-105 shadow-2xl bg-transparent"
-      onError={(e)=>{e.target.src="/Shaney Logo.jpg"}}
-    />
-  </div>
-</div>
+          <div className="group relative w-full bg-slate-900/80 backdrop-blur-xl p-4 sm:p-6 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/30 overflow-hidden flex items-center justify-center">
+            <img 
+              src={logoImage} 
+              alt="Company Logo" 
+              className="w-full h-auto object-contain rounded-2xl transition-transform duration-500 ease-in-out group-hover:scale-105 shadow-2xl bg-transparent"
+              onError={(e)=>{e.target.src="/Shaney Logo.jpg"}}
+            />
+          </div>
+        </div>
 
         <div className="w-full lg:w-1/2 flex items-center justify-center relative z-10 max-w-lg">
           <form onSubmit={handleAuthSubmit} className="w-full bg-slate-900/90 backdrop-blur-2xl p-6 sm:p-8 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/40">
@@ -1222,7 +1297,7 @@ export default function App() {
                       <div 
                         key={st.userid} 
                         onClick={() => handleEditStaffClick(st)}
-                        className={`flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${editingStaffId === st.userid ? 'bg-amber-50 border-amber-500' : 'bg-slate-50 border-slate-100 hover:bg-emerald-50/50'}`}
+                        className={`group flex justify-between items-center p-3 rounded-xl border transition-all cursor-pointer ${editingStaffId === st.userid ? 'bg-amber-50 border-amber-500' : 'bg-slate-50 border-slate-100 hover:bg-emerald-50/50'}`}
                         title="Click to edit staff"
                       >
                         <div>
@@ -1232,7 +1307,15 @@ export default function App() {
                         <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                           <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">{st.role || 'STAFF'}</span>
                           {st.userid !== 'admin' && (
-                            <button onClick={() => handleDeleteStaff(st.userid)} className="text-red-500 hover:text-red-700 text-xs font-bold px-1.5 py-0.5 cursor-pointer">&times;</button>
+                            <button 
+                              onClick={(e) => handleDeleteStaff(e, st.userid)} 
+                              className="opacity-0 group-hover:opacity-100 transition-opacity bg-red-100 hover:bg-red-600 hover:text-white text-red-600 px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase cursor-pointer flex items-center justify-center shadow-sm"
+                              title="Delete Account"
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                              </svg>
+                            </button>
                           )}
                         </div>
                       </div>
