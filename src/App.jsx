@@ -1,5 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
+import { db, auth } from './firebase';
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { collection, getDocs, doc, setDoc, deleteDoc, addDoc, getDoc, query, where } from 'firebase/firestore';
 import Dashboard from './Dashboard.jsx';
 import Settings from './Settings.jsx';
 import Templates from './Templates.jsx';
@@ -13,9 +16,8 @@ import Crm from './Crm.jsx';
 import Envelope from './Envelope.jsx'; 
 import Sticker from './Sticker.jsx';
 
+// 🟢 Local logo asset import (Vercel & Build safe)
 import logoImage from './logo.jpg'; 
-
-const BACKEND_URL = "https://shaney-erp-backend.onrender.com";
 
 const getCurrentFY = () => {
   const d = new Date();
@@ -24,61 +26,10 @@ const getCurrentFY = () => {
   return m >= 4 ? `F.Y. ${y}-${String(y + 1).slice(-2)}` : `F.Y. ${y - 1}-${String(y).slice(-2)}`;
 };
 
-const normalizeFY = (fyStr) => {
-  if (!fyStr || fyStr === 'ALL') return fyStr;
-  let clean = String(fyStr).trim().toUpperCase();
-  clean = clean.replace(/^(F\.Y\.?\s*|FY\s*)/, '');
-  if (clean.match(/^\d{2}-\d{2}$/)) {
-    clean = '20' + clean;
-  }
-  return `F.Y. ${clean}`;
-};
-
-// 🟢 SMART CLOUD EXTRACTOR: Overcomes backend append bugs & purges duplicates completely
-const extractStaffFromCloud = (allData) => {
-  try {
-    let extracted = [];
-    let individualItems = [];
-    
-    if (Array.isArray(allData)) {
-      const masterItem = allData.find(i => String(i.id) === 'staff_accounts');
-      if (masterItem && Array.isArray(masterItem.data)) {
-        extracted = masterItem.data;
-      }
-      individualItems = allData.filter(i => i.docType === 'staff_account');
-    } else if (allData && typeof allData === 'object') {
-      if (allData.staff_accounts) {
-        individualItems = Array.isArray(allData.staff_accounts) ? allData.staff_accounts : (allData.staff_accounts.data || []);
-      }
-      if (allData.settings) {
-        const settingsArr = Array.isArray(allData.settings) ? allData.settings : Object.values(allData.settings);
-        const masterItem = settingsArr.find(i => String(i.id) === 'staff_accounts');
-        if (masterItem && Array.isArray(masterItem.data)) {
-          extracted = masterItem.data;
-        }
-      }
-    }
-
-    const combined = [...extracted, ...individualItems];
-
-    const uniqueMap = new Map();
-    
-    combined.forEach(s => {
-      if (s && s.userid && s.deleted !== true) {
-        uniqueMap.set(String(s.userid).toLowerCase(), s);
-      }
-    });
-
-    combined.forEach(s => {
-      if (s && s.userid && s.deleted === true) {
-        uniqueMap.delete(String(s.userid).toLowerCase());
-      }
-    });
-
-    return Array.from(uniqueMap.values());
-  } catch (e) {
-    return [];
-  }
+// 🟢 Device Detection Helper
+const isMobileDevice = () => {
+  if (typeof window === 'undefined') return false;
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth < 768;
 };
 
 export default function App() {
@@ -89,60 +40,30 @@ export default function App() {
   const [previewDocData, setPreviewDocData] = useState(null);
   const [previewLoading, setPreviewLoading] = useState(isPreviewRoute);
 
+  // 🟢 24*7 Real-Time Background Auto Delta Sync Worker (Runs every 5 Seconds with minimum reads/writes)
   useEffect(() => {
     const runRealtimeSync = async () => {
       try {
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) {
-            const lastSync = Number(localStorage.getItem('ERP_Last_Sync_Timestamp') || 0);
-            const deltaRecords = await ipcRenderer.invoke('sqlite-get-delta-records', lastSync);
-            for (let rec of deltaRecords) {
-               let correctType = rec.docType || 'certificates';
-               if (correctType === 'certificate') correctType = 'certificates';
-               if (correctType === 'quotation') correctType = 'quotations';
-               if (correctType === 'customer') correctType = 'customers';
-               if (correctType === 'product') correctType = 'products';
+        if (!window.require) return;
+        const { ipcRenderer } = window.require('electron');
+        if (!ipcRenderer) return;
 
-               await fetch(`${BACKEND_URL}/api/data`, {
-                 method: 'POST',
-                 headers: { 'Content-Type': 'application/json' },
-                 body: JSON.stringify({ type: correctType, id: String(rec.id), data: rec })
-               });
-            }
-          }
+        const lastSync = Number(localStorage.getItem('ERP_Last_Sync_Timestamp') || 0);
+        
+        // 1. Push local new/updated records to Firebase (Minimum Writes: only changed records)
+        const deltaRecords = await ipcRenderer.invoke('sqlite-get-delta-records', lastSync);
+        for (let rec of deltaRecords) {
+           await setDoc(doc(db, "history", String(rec.id)), rec, { merge: true });
         }
 
-        const res = await fetch(`${BACKEND_URL}/api/data`);
-        if (res.ok) {
-          const allData = await res.json();
-          if (Array.isArray(allData) && allData.length > 0) {
-            let history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-            let hasChanged = false;
-
-            for (let cloudData of allData) {
-              const idx = history.findIndex(h => String(h.id) === String(cloudData.id));
-              if (idx === -1 || (cloudData.updatedAt && cloudData.updatedAt > (history[idx].updatedAt || 0))) {
-                if (idx === -1) {
-                  history.push(cloudData);
-                } else {
-                  history[idx] = cloudData;
-                }
-                hasChanged = true;
-
-                if (window.require) {
-                  const { ipcRenderer } = window.require('electron');
-                  if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', cloudData);
-                }
-              }
-            }
-
-            if (hasChanged) {
-              localStorage.setItem('ERP_History_v104', JSON.stringify(history));
-              window.dispatchEvent(new CustomEvent('ERP_DATA_UPDATED', { detail: { type: 'all' } }));
-            }
-          }
-        }
+        // 2. Pull new changes from Firebase (Minimum Reads: where updatedAt > lastSync)
+        const q = query(collection(db, "history"), where("updatedAt", ">", lastSync));
+        const querySnapshot = await getDocs(q);
+        
+        querySnapshot.forEach(async (docSnap) => {
+          const cloudData = docSnap.data();
+          await ipcRenderer.invoke('sqlite-save-record', cloudData);
+        });
 
         localStorage.setItem('ERP_Last_Sync_Timestamp', Date.now());
       } catch (err) {
@@ -151,7 +72,7 @@ export default function App() {
     };
 
     runRealtimeSync();
-    const syncInterval = setInterval(runRealtimeSync, 8000);
+    const syncInterval = setInterval(runRealtimeSync, 5000); // Every 5 seconds live sync
     return () => clearInterval(syncInterval);
   }, []);
 
@@ -173,17 +94,25 @@ export default function App() {
             return;
           }
 
-          const res = await fetch(`${BACKEND_URL}/api/document/${previewDocId}`);
-          if (res.ok) {
-            const cloudJson = await res.json();
-            if (cloudJson && cloudJson.data) {
-              const data = cloudJson.data;
-              const docTypeKey = data.docType || 'certificate';
-              localStorage.setItem(`shaney_${docTypeKey}_${previewDocId}`, JSON.stringify(data));
-              setPreviewDocData({ type: docTypeKey, data });
-              setPreviewLoading(false);
-              return;
-            }
+          let docRef = doc(db, "certificates", String(previewDocId));
+          let docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            localStorage.setItem(`shaney_certificate_${previewDocId}`, JSON.stringify(data));
+            setPreviewDocData({ type: 'certificate', data });
+            setPreviewLoading(false);
+            return;
+          }
+
+          docRef = doc(db, "history", String(previewDocId));
+          docSnap = await getDoc(docRef);
+          if (docSnap.exists()) {
+            const data = docSnap.data();
+            localStorage.setItem(`shaney_quotation_${previewDocId}`, JSON.stringify(data));
+            setPreviewDocData({ type: 'quotation', data });
+            setPreviewLoading(false);
+            return;
           }
 
           setPreviewLoading(false);
@@ -196,13 +125,12 @@ export default function App() {
     }
   }, [isPreviewRoute, previewDocId]);
 
-  // 🟢 PERSISTENT LOCAL STORAGE LOGIC: Prevents logout on page refresh (Fixed from sessionStorage)
   const [isAuthenticated, setIsAuthenticated] = useState(() => {
-    return localStorage.getItem("ERP_Active_Role") ? true : false;
+    return localStorage.getItem("ERP_Active_Role") || sessionStorage.getItem("ERP_Active_Role") ? true : false;
   });
   const [currentUser, setCurrentUser] = useState(() => {
     try {
-      const saved = localStorage.getItem("ERP_Active_Staff_Data");
+      const saved = localStorage.getItem("ERP_Active_Staff_Data") || sessionStorage.getItem("ERP_Active_Staff_Data");
       return saved ? JSON.parse(saved) : { name: 'Shaney Enterprise', role: 'ADMIN' };
     } catch(e) {
       return { name: 'Shaney Enterprise', role: 'ADMIN' };
@@ -215,7 +143,9 @@ export default function App() {
 
   const [showPassword, setShowPassword] = useState(false);
   const [isForgotOpen, setIsForgotOpen] = useState(false);
+  const [isRegisterOpen, setIsRegisterOpen] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
+  const [registerInput, setRegisterInput] = useState({ email: '', password: '', confirmPassword: '' });
 
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -225,16 +155,7 @@ export default function App() {
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
 
   const [selectedFY, setSelectedFY] = useState(getCurrentFY());
-  const [availableFYs, setAvailableFYs] = useState(() => {
-    try {
-      const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-      const historyFYs = history.map(item => normalizeFY(item.fy)).filter(Boolean);
-      const currentFY = normalizeFY(getCurrentFY());
-      return Array.from(new Set([...historyFYs, currentFY])).filter(Boolean).sort().reverse();
-    } catch(e) {
-      return [normalizeFY(getCurrentFY())];
-    }
-  });
+  const [availableFYs, setAvailableFYs] = useState([]);
 
   const [certInitialMode, setCertInitialMode] = useState('list');
   const [quoteInitialMode, setQuoteInitialMode] = useState('list');
@@ -242,20 +163,8 @@ export default function App() {
   const [staffList, setStaffList] = useState(() => {
     try {
       const saved = localStorage.getItem('ERP_Staff_Accounts_v1');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed)) {
-          const uniqueMap = new Map();
-          parsed.forEach(s => {
-            if (s && s.userid && !s.deleted) uniqueMap.set(String(s.userid).toLowerCase(), s);
-          });
-          const cleanStaff = Array.from(uniqueMap.values());
-          localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cleanStaff));
-          return cleanStaff;
-        }
-      }
-    } catch(e) {}
-    return [];
+      return saved ? JSON.parse(saved) : [];
+    } catch(e) { return []; }
   });
 
   const postCloudOfficeLog = async (actionText, staffName) => {
@@ -269,11 +178,7 @@ export default function App() {
         time: now.toLocaleTimeString(),
         updatedAt: Date.now()
       };
-      await fetch(`${BACKEND_URL}/api/logs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: logObj.action })
-      });
+      await addDoc(collection(db, "office_logs"), logObj);
     } catch (e) {
       try {
         let logs = JSON.parse(localStorage.getItem("ERP_Office_Live_Logs") || "[]");
@@ -282,7 +187,7 @@ export default function App() {
           staff: staffName.toUpperCase(),
           action: `${staffName.toUpperCase()}: ${actionText}`,
           date: new Date().toLocaleDateString('en-GB'),
-          time: new Date().toLocaleTimeString(),
+          time: now.toLocaleTimeString(),
           updatedAt: Date.now()
         });
         localStorage.setItem("ERP_Office_Live_Logs", JSON.stringify(logs));
@@ -321,7 +226,12 @@ export default function App() {
     recordCloudLogoutTimestamp();
     localStorage.removeItem("ERP_Active_Role");
     localStorage.removeItem("ERP_Active_Staff_Data");
+    sessionStorage.removeItem("ERP_Active_Role");
+    sessionStorage.removeItem("ERP_Active_Staff_Data");
     document.body.classList.remove('staff-logged-in');
+    if (auth) {
+      auth.signOut().catch(() => {});
+    }
     setIsAuthenticated(false);
     setCurrentUser(null);
   };
@@ -329,7 +239,7 @@ export default function App() {
   useEffect(() => {
     if (!isAuthenticated || !currentUser) return;
 
-    const inactivityTimeout = currentUser.role === 'STAFF' ? 15 * 60 * 1000 : 30 * 60 * 1000;
+    const inactivityTimeout = currentUser.role === 'STAFF' ? 5 * 60 * 1000 : 15 * 60 * 1000;
     let timer;
 
     const resetTimer = () => {
@@ -337,7 +247,7 @@ export default function App() {
       timer = setTimeout(() => {
         recordCloudLogoutTimestamp();
         handleLogout();
-        alert(`Session expired due to ${currentUser.role === 'STAFF' ? '15' : '30'} minutes of inactivity. Please login again.`);
+        alert(`Session expired due to ${currentUser.role === 'STAFF' ? '5' : '15'} minutes of inactivity. Please login again.`);
       }, inactivityTimeout);
     };
 
@@ -357,14 +267,14 @@ export default function App() {
 
     const fetchCloudStaffOnce = async () => {
       try {
-        const res = await fetch(`${BACKEND_URL}/api/data`);
-        if (res.ok) {
-          const allData = await res.json();
-          const cleanCloudStaff = extractStaffFromCloud(allData);
-          if (cleanCloudStaff.length > 0) {
-            setStaffList(cleanCloudStaff);
-            localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cleanCloudStaff));
-          }
+        const querySnapshot = await getDocs(collection(db, "staff_accounts"));
+        const cloudStaff = [];
+        querySnapshot.forEach((docSnap) => {
+          cloudStaff.push(docSnap.data());
+        });
+        if (cloudStaff.length > 0) {
+          setStaffList(cloudStaff);
+          localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cloudStaff));
         }
       } catch (err) {
         console.error("Error fetching staff from cloud:", err);
@@ -384,13 +294,11 @@ export default function App() {
   });
 
   useEffect(() => {
-    try {
-      const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
-      const historyFYs = history.map(item => normalizeFY(item.fy)).filter(Boolean);
-      const currentFY = normalizeFY(getCurrentFY());
-      const uniqueFYs = Array.from(new Set([...historyFYs, currentFY])).filter(Boolean).sort().reverse();
-      setAvailableFYs(uniqueFYs);
-    } catch(e) {}
+    const history = JSON.parse(localStorage.getItem('ERP_History_v104') || '[]');
+    const historyFYs = history.map(item => item.fy).filter(Boolean);
+    const currentFY = getCurrentFY();
+    const uniqueFYs = Array.from(new Set([...historyFYs, currentFY])).sort().reverse();
+    setAvailableFYs(uniqueFYs);
   }, []);
 
   useEffect(() => {
@@ -451,6 +359,8 @@ export default function App() {
       }
     };
 
+    const targetStorage = isMobileDevice() ? sessionStorage : localStorage;
+
     if (inputVal.toLowerCase() === 'shaneyenterprise101@gmail.com' || inputVal.toLowerCase() === 'admin') {
       if (password === 'Shaney@123' || password === 'admin123') {
         const adminUser = { 
@@ -461,8 +371,8 @@ export default function App() {
         };
 
         setCurrentUser(adminUser);
-        localStorage.setItem("ERP_Active_Role", "ADMIN");
-        localStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
+        targetStorage.setItem("ERP_Active_Role", "ADMIN");
+        targetStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
         recordLocalLoginTimestamp("ADMIN");
         postCloudOfficeLog("Successfully Logged In to System", "ADMIN");
         setIsAuthenticated(true);
@@ -470,51 +380,70 @@ export default function App() {
       }
     }
 
-    try {
-      const res = await fetch(`${BACKEND_URL}/api/data`);
-      if (res.ok) {
-        const allData = await res.json();
-        const cleanCloudStaff = extractStaffFromCloud(allData);
+    let currentStaffList = staffList;
+    let foundStaff = currentStaffList.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
 
-        if (cleanCloudStaff.length > 0) {
-          setStaffList(cleanCloudStaff);
-          localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cleanCloudStaff));
-          
-          const foundStaff = cleanCloudStaff.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
-          
-          if (foundStaff) {
-            if (String(foundStaff.password) === String(password)) {
-              const staffUserObj = {
-                userid: foundStaff.userid,
-                name: foundStaff.name,
-                role: 'STAFF',
-                phone: foundStaff.phone || '',
-                permissions: foundStaff.permissions || { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true }
-              };
-              setCurrentUser(staffUserObj);
-              localStorage.setItem("ERP_Active_Role", "STAFF");
-              localStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(staffUserObj));
-              recordLocalLoginTimestamp(staffUserObj.name);
-              postCloudOfficeLog("Successfully Logged In to System", staffUserObj.name);
-              setIsAuthenticated(true);
-              return;
-            } else {
-              setErrorMsg('Incorrect Password for Staff Account!');
-              return;
-            }
-          }
+    if (!foundStaff) {
+      try {
+        const querySnapshot = await getDocs(collection(db, "staff_accounts"));
+        const cloudStaff = [];
+        querySnapshot.forEach((docSnap) => {
+          cloudStaff.push(docSnap.data());
+        });
+        if (cloudStaff.length > 0) {
+          currentStaffList = cloudStaff;
+          setStaffList(cloudStaff);
+          localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cloudStaff));
+          foundStaff = currentStaffList.find(s => String(s.userid).toLowerCase() === inputVal.toLowerCase() || String(s.name).toLowerCase() === inputVal.toLowerCase());
         }
-      } else {
-        setErrorMsg('Network error. Could not connect to cloud server.');
-        return;
+      } catch (err) {
+        console.error("Cloud staff fetch error during login:", err);
       }
-    } catch (err) {
-      console.error("Cloud login error:", err);
-      setErrorMsg('Failed to connect. Please check your internet connection.');
-      return;
     }
 
-    setErrorMsg('Invalid Admin Email or Staff User ID / Password!');
+    if (foundStaff) {
+      if (String(foundStaff.password) === String(password)) {
+        const staffUserObj = {
+          userid: foundStaff.userid,
+          name: foundStaff.name,
+          role: 'STAFF',
+          phone: foundStaff.phone || '',
+          permissions: foundStaff.permissions || { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true }
+        };
+        setCurrentUser(staffUserObj);
+        targetStorage.setItem("ERP_Active_Role", "STAFF");
+        targetStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(staffUserObj));
+        recordLocalLoginTimestamp(staffUserObj.name);
+        postCloudOfficeLog("Successfully Logged In to System", staffUserObj.name);
+        setIsAuthenticated(true);
+        return;
+      } else {
+        setErrorMsg('Incorrect Password for Staff Account!');
+        return;
+      }
+    }
+
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, inputVal, password);
+      const user = userCredential.user;
+
+      const adminUser = { 
+        userid: user.email, 
+        name: 'Shaney Enterprise', 
+        role: 'ADMIN', 
+        permissions: { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true } 
+      };
+
+      setCurrentUser(adminUser);
+      targetStorage.setItem("ERP_Active_Role", "ADMIN");
+      targetStorage.setItem("ERP_Active_Staff_Data", JSON.stringify(adminUser));
+      recordLocalLoginTimestamp("ADMIN");
+      postCloudOfficeLog("Successfully Logged In to System", "ADMIN");
+      setIsAuthenticated(true);
+    } catch (err) {
+      console.error("Firebase Login Error:", err);
+      setErrorMsg('Invalid Admin Email or Staff User ID / Password!');
+    }
   };
 
   const handleRestoreBackup = (e) => {
@@ -536,7 +465,7 @@ export default function App() {
     };
   };
 
-  const handleForgotPassword = (e) => {
+  const handleForgotPassword = async (e) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
@@ -544,7 +473,44 @@ export default function App() {
       setErrorMsg('Please enter your registered email address.');
       return;
     }
-    setSuccessMsg('Default Master Admin Password is: Shaney@123');
+    try {
+      await sendPasswordResetEmail(auth, resetEmail.trim());
+      setSuccessMsg('Password reset link sent to your email!');
+      setTimeout(() => setIsForgotOpen(false), 3000);
+    } catch (err) {
+      console.error("Reset Password Error:", err);
+      setErrorMsg('Failed to send reset email. Check if email is correct.');
+    }
+  };
+
+  const handleRegisterSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMsg('');
+    setSuccessMsg('');
+    const email = registerInput.email.trim();
+    const password = registerInput.password.trim();
+    const confirmPassword = registerInput.confirmPassword.trim();
+
+    if (!email || !password || !confirmPassword) {
+      setErrorMsg('Please fill in all fields.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorMsg('Passwords do not match!');
+      return;
+    }
+
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      setSuccessMsg('Account created successfully! You can now log in.');
+      setTimeout(() => {
+        setIsRegisterOpen(false);
+        setRegisterInput({ email: '', password: '', confirmPassword: '' });
+      }, 2000);
+    } catch (err) {
+      console.error("Register Error:", err);
+      setErrorMsg('Registration failed: ' + err.message);
+    }
   };
 
   const handlePermissionChange = (key, val) => {
@@ -566,42 +532,32 @@ export default function App() {
     const formattedUserId = newStaffForm.userid.trim().toLowerCase();
     
     let targetStaffObj = null;
-    let updatedStaffList = [...staffList];
+    let updatedStaffList = [];
 
     if (editingStaffId !== null) {
-      targetStaffObj = { ...newStaffForm, userid: formattedUserId, role: 'STAFF', docType: 'staff_account', updatedAt: Date.now() };
-      updatedStaffList = updatedStaffList.map(s => String(s.userid).toLowerCase() === String(editingStaffId).toLowerCase() ? targetStaffObj : s);
+      targetStaffObj = { ...newStaffForm, userid: editingStaffId, role: 'STAFF' };
+      updatedStaffList = staffList.map(s => s.userid === editingStaffId ? targetStaffObj : s);
       setEditingStaffId(null);
     } else {
-      if (updatedStaffList.some(s => String(s.userid).toLowerCase() === formattedUserId)) {
+      if (staffList.some(s => s.userid.toLowerCase() === formattedUserId)) {
         alert('This User ID already exists!');
         return;
       }
-      targetStaffObj = { ...newStaffForm, userid: formattedUserId, role: 'STAFF', docType: 'staff_account', updatedAt: Date.now() };
-      updatedStaffList.push(targetStaffObj);
+      targetStaffObj = { ...newStaffForm, userid: formattedUserId, role: 'STAFF' };
+      updatedStaffList = [...staffList, targetStaffObj];
     }
 
-    const uniqueMap = new Map();
-    updatedStaffList.forEach(s => {
-      if (s && s.userid && !s.deleted) uniqueMap.set(String(s.userid).toLowerCase(), s);
-    });
-    const finalCleanList = Array.from(uniqueMap.values());
-
-    setStaffList(finalCleanList);
-    localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(finalCleanList));
+    setStaffList(updatedStaffList);
+    localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(updatedStaffList));
     
-    const simpleNames = finalCleanList.map(s => s.name.toUpperCase());
+    const simpleNames = updatedStaffList.map(s => s.name.toUpperCase());
     localStorage.setItem('ERP_StaffList', JSON.stringify(simpleNames));
 
     try {
-      await fetch(`${BACKEND_URL}/api/data`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'settings', id: 'staff_accounts', data: finalCleanList })
-      });
-      alert('✅ Staff Account Saved & Synced to Cloud!');
+      await setDoc(doc(db, "staff_accounts", String(targetStaffObj.userid)), targetStaffObj);
+      alert('Staff Account Saved to Cloud!');
     } catch (err) {
-      console.error("Cloud staff save error:", err);
+      console.error("Firebase staff save error:", err);
     }
 
     setNewStaffForm({ userid: '', name: '', phone: '', password: '', permissions: { Dashboard: true, Certificate: true, Quotation: true, CRM: true, Export: true } });
@@ -618,42 +574,18 @@ export default function App() {
     });
   };
 
-  // 🟢 PERMANENT FORCE DELETION LOGIC FOR CLOUD DB
-  const handleDeleteStaff = async (e, uId) => {
-    e.stopPropagation(); 
+  const handleDeleteStaff = async (uId) => {
     if (confirm('Are you sure you want to delete this staff account?')) {
-      const cleanList = staffList.filter(s => String(s.userid).toLowerCase() !== String(uId).toLowerCase());
-
-      setStaffList(cleanList);
-      localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(cleanList));
-
-      const simpleNames = cleanList.map(s => s.name.toUpperCase());
-      localStorage.setItem('ERP_StaffList', JSON.stringify(simpleNames));
+      const updated = staffList.filter(s => s.userid !== uId);
+      setStaffList(updated);
+      localStorage.setItem('ERP_Staff_Accounts_v1', JSON.stringify(updated));
 
       try {
-        // Individual fallback delete
-        fetch(`${BACKEND_URL}/api/data/${encodeURIComponent(uId)}`, { method: 'DELETE' }).catch(()=>{});
-        
-        // Force Overwrite the DynamoDB array
-        await fetch(`${BACKEND_URL}/api/data`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ 
-            type: 'settings', 
-            id: 'staff_accounts', 
-            data: cleanList 
-          })
-        });
-
-        if (window.require) {
-          const { ipcRenderer } = window.require('electron');
-          if (ipcRenderer) await ipcRenderer.invoke('sqlite-save-record', { id: uId, userid: uId, docType: 'staff_account', deleted: true, updatedAt: Date.now() });
-        }
+        await deleteDoc(doc(db, "staff_accounts", String(uId)));
       } catch (err) {
-        console.error("Cloud staff delete error:", err);
+        console.error("Firebase staff delete error:", err);
       }
-
-      alert('✅ Staff Account Deleted Successfully from Local & Cloud!');
+      alert('Staff Account Deleted Successfully!');
     }
   };
 
@@ -753,16 +685,17 @@ export default function App() {
         <div className="absolute inset-0 bg-gradient-to-br from-slate-950 via-emerald-950/40 to-slate-950 z-0"></div>
         <div className="absolute inset-0 bg-[radial-gradient(#00a67e_1px,transparent_1px)] [background-size:24px_24px] opacity-10 z-0"></div>
 
+        {/* 🟢 विजिटिंग कार्ड हटाकर यहाँ असली लोगो सेट कर दिया गया है */}
         <div className="w-full lg:w-1/2 flex items-center justify-center relative z-10 max-w-lg">
-          <div className="group relative w-full bg-slate-900/80 backdrop-blur-xl p-4 sm:p-6 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/30 overflow-hidden flex items-center justify-center">
-            <img 
-              src={logoImage} 
-              alt="Company Logo" 
-              className="w-full h-auto object-contain rounded-2xl transition-transform duration-500 ease-in-out group-hover:scale-105 shadow-2xl bg-transparent"
-              onError={(e)=>{e.target.src="/Shaney Logo.jpg"}}
-            />
-          </div>
-        </div>
+  <div className="group relative w-full bg-slate-900/80 backdrop-blur-xl p-4 sm:p-6 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/30 overflow-hidden flex items-center justify-center">
+    <img 
+      src={logoImage} 
+      alt="Company Logo" 
+      className="w-full h-auto object-contain rounded-2xl transition-transform duration-500 ease-in-out group-hover:scale-105 shadow-2xl bg-transparent"
+      onError={(e)=>{e.target.src="/Shaney Logo.jpg"}}
+    />
+  </div>
+</div>
 
         <div className="w-full lg:w-1/2 flex items-center justify-center relative z-10 max-w-lg">
           <form onSubmit={handleAuthSubmit} className="w-full bg-slate-900/90 backdrop-blur-2xl p-6 sm:p-8 rounded-3xl shadow-[0_25px_60px_rgba(0,0,0,0.6)] border border-emerald-500/40">
